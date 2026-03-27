@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧农业低代码平台 - 工作流编辑器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-container">
+    <!-- 菜单栏 -->
+    <div class="menu-bar">
+        <div class="title">🌾 智慧农业低代码平台 · 工作流编辑器</div>
+
+        <!-- 文件菜单 -->
+        <div class="menu-item has-submenu">
+            文件
+            <div class="submenu">
+                <div class="submenu-item" id="newProjectBtn">📄 新建项目</div>
+                <div class="submenu-item" id="saveProjectBtn">💾 保存项目</div>
+                <div class="submenu-item" id="loadProjectBtn">📂 加载项目</div>
+            </div>
+        </div>
+
+        <!-- 项目菜单 -->
+        <div class="menu-item has-submenu">
+            项目
+            <div class="submenu">
+                <div class="submenu-item" id="exportProjectBtn">📎 导出JSON</div>
+                <div class="submenu-item" id="importProjectBtn">📥 导入JSON</div>
+            </div>
+        </div>
+
+        <!-- 设置菜单 -->
+        <div class="menu-item has-submenu">
+            设置
+            <div class="submenu">
+                <div class="submenu-item" id="consoleSettingBtn">⚙️ 控制台输出模式</div>
+            </div>
+        </div>
+
+        <!-- 窗口菜单（预留） -->
+        <div class="menu-item has-submenu">
+            窗口
+            <div class="submenu">
+                <div class="submenu-item">重置视图</div>
+                <div class="submenu-item">帮助</div>
+            </div>
+        </div>
+
+        <div class="top-right">
+            <button class="run-button" id="runWorkflowBtn">▶ 运行工作流</button>
+        </div>
+    </div>
+
+    <div class="main-layout">
+        <!-- 左侧组件库 -->
+        <div class="components-panel">
+            <div class="panel-header">📦 组件库 (拖拽到画布)</div>
+            <div class="components-list">
+                <div class="comp-item" draggable="true" data-type="start">
+                    🟢 开始节点
+                    <div class="comp-desc">工作流入口</div>
+                </div>
+                <div class="comp-item" draggable="true" data-type="print">
+                    🖨️ 打印节点
+                    <div class="comp-desc">输出调试信息</div>
+                </div>
+                <div class="comp-item" draggable="true" data-type="sequence">
+                    🔁 顺序节点
+                    <div class="comp-desc">占位/传递执行流</div>
+                </div>
+                <div class="comp-item" draggable="true" data-type="loop">
+                    🔄 循环节点
+                    <div class="comp-desc">重复执行指定次数</div>
+                </div>
+                <div class="comp-item" draggable="true" data-type="branch">
+                    🌿 分支节点 (if/else)
+                    <div class="comp-desc">根据条件选择路径</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 中间画布区 -->
+        <div class="canvas-area" id="canvasArea">
+            <div id="canvas" style="position: relative; min-height: 100%; min-width: 100%;">
+                <svg id="connectionsSvg" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none;"></svg>
+            </div>
+        </div>
+
+        <!-- 右侧属性面板 -->
+        <div class="properties-panel" id="propsPanel">
+            <div class="prop-header">⚙️ 属性配置</div>
+            <div class="prop-content" id="propContent">
+                <div class="help-text">点击画布中的节点查看并修改属性</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部控制台 -->
+    <div class="console-panel">
+        <div class="console-header">
+            <span>📟 运行控制台</span>
+            <button class="clear-console" id="clearConsoleBtn">清空</button>
+        </div>
+        <div class="console-output" id="consoleOutput">
+            <div class="log-line">✨ 就绪，拖拽组件至画布构建工作流，点击运行查看效果。</div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
