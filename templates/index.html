@@ -22,6 +22,15 @@
             </div>
         </div>
 
+        <!-- 编辑菜单 -->
+        <div class="menu-item has-submenu">
+            编辑
+            <div class="submenu">
+                <div class="submenu-item" id="deleteSelectedBtn">🗑️ 删除选中节点</div>
+                <div class="submenu-item" id="clearCanvasBtn">🧹 清空画布</div>
+            </div>
+        </div>
+
         <!-- 项目菜单 -->
         <div class="menu-item has-submenu">
             项目
@@ -36,6 +45,7 @@
             设置
             <div class="submenu">
                 <div class="submenu-item" id="consoleSettingBtn">⚙️ 控制台输出模式</div>
+                <div class="submenu-item" id="tipsSettingBtn">🛈 使用提示</div>
             </div>
         </div>
 
@@ -43,13 +53,14 @@
         <div class="menu-item has-submenu">
             窗口
             <div class="submenu">
-                <div class="submenu-item">重置视图</div>
-                <div class="submenu-item">帮助</div>
+                <div class="submenu-item" id="resetViewBtn">重置视图</div>
+                <div class="submenu-item" id="helpBtn">帮助</div>
+                <div class="submenu-item" id="aboutBtn">关于</div>
             </div>
         </div>
 
         <div class="top-right">
-            <button class="run-button" id="runWorkflowBtn">▶ 运行工作流</button>
+            <button class="run-button" id="runWorkflowBtn" title="运行工作流">▶ 运行工作流</button>
         </div>
     </div>
 
@@ -101,7 +112,7 @@
     <div class="console-panel">
         <div class="console-header">
             <span>📟 运行控制台</span>
-            <button class="clear-console" id="clearConsoleBtn">清空</button>
+            <button class="clear-console" id="clearConsoleBtn" title="清空控制台输出">清空</button>
         </div>
         <div class="console-output" id="consoleOutput">
             <div class="log-line">✨ 就绪，拖拽组件至画布构建工作流，点击运行查看效果。</div>
@@ -109,6 +120,21 @@
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='script.js') }}"></script>
+<!-- 简易可视化弹窗容器 -->
+<div class="modal-mask" id="modalMask" style="display:none;">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modalTitle">标题</div>
+            <button class="modal-close" id="modalCloseBtn" title="关闭">✕</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-footer" id="modalFooter">
+            <button class="modal-btn" id="modalCancelBtn" title="取消">取消</button>
+            <button class="modal-btn primary" id="modalOkBtn" title="确定">确定</button>
+        </div>
+    </div>
+</div>
+
+    <script type="module" src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

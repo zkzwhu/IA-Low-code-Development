@@ -91,22 +91,32 @@ def execute_workflow():
             exec_node(next_id, depth)
 
         elif node_type == 'loop':
+            cond_type = props.get('loopConditionType', 'count')
             loop_count = props.get('loopCount', 1)
-            body_start = props.get('bodyStartId')
-            after_loop = props.get('afterLoopId')
+            body_ids = props.get('bodyNodeIds', []) or []
+            next_id = props.get('nextNodeId')
+
+            # 目前执行器只实现 count 模式；expr 模式先按 1 次执行并提示
+            if cond_type == 'expr':
+                add_log(f"{indent}🔁 循环条件(expr) 尚未执行化，先按 1 次运行：{props.get('loopConditionExpr', '')}")
+                loop_count = 1
+            try:
+                loop_count = int(loop_count)
+            except Exception:
+                loop_count = 1
+            if loop_count < 1:
+                loop_count = 1
+
             add_log(f"{indent}🔄 循环开始: 共 {loop_count} 次")
             for i in range(1, loop_count + 1):
                 add_log(f"{indent}   ↻ 循环第 {i} 次")
-                if body_start:
-                    exec_node(body_start, depth + 1)
+                if body_ids:
+                    for bid in body_ids:
+                        exec_node(bid, depth + 1)
                 else:
                     add_log(f"{indent}  ⚠️ 循环体为空")
             add_log(f"{indent}✅ 循环结束")
-            if after_loop:
-                exec_node(after_loop, depth)
-            else:
-                next_id = props.get('nextNodeId')
-                exec_node(next_id, depth)
+            exec_node(next_id, depth)
 
         elif node_type == 'branch':
             condition = props.get('branchCondition', True)
