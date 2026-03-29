@@ -202,9 +202,20 @@ function initDemoFlow() {
     start.properties.nextNodeId = print1.id;
     print1.properties.nextNodeId = loopNode.id;
     loopNode.properties.bodyNodeIds = [innerPrint.id];
+    innerPrint.parentId = loopNode.id;
+    innerPrint.localX = 20;
+    innerPrint.localY = 20;
     loopNode.properties.nextNodeId = branchNode.id;
-    branchNode.properties.trueBranchId = truePrint.id;
-    branchNode.properties.falseBranchId = falsePrint.id;
+    branchNode.properties.trueBodyNodeIds = [truePrint.id];
+    branchNode.properties.falseBodyNodeIds = [falsePrint.id];
+    truePrint.parentId = branchNode.id;
+    truePrint.properties.branchSide = "true";
+    truePrint.localX = 20;
+    truePrint.localY = 28;
+    falsePrint.parentId = branchNode.id;
+    falsePrint.properties.branchSide = "false";
+    falsePrint.localX = 20;
+    falsePrint.localY = 28;
 
     [start, print1, loopNode, innerPrint, branchNode, truePrint, falsePrint].forEach(n => state.nodes.set(n.id, n));
     renderCanvas();

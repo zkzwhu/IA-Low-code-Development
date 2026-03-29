@@ -119,6 +119,12 @@ export function deleteNodeById(id) {
         if (node.type === 'branch') {
             if (node.properties.trueBranchId === id) node.properties.trueBranchId = null;
             if (node.properties.falseBranchId === id) node.properties.falseBranchId = null;
+            if (Array.isArray(node.properties.trueBodyNodeIds)) {
+                node.properties.trueBodyNodeIds = node.properties.trueBodyNodeIds.filter(x => x !== id);
+            }
+            if (Array.isArray(node.properties.falseBodyNodeIds)) {
+                node.properties.falseBodyNodeIds = node.properties.falseBodyNodeIds.filter(x => x !== id);
+            }
         }
         if (node.properties.nextNodeId === id) node.properties.nextNodeId = null;
     }
@@ -134,6 +140,70 @@ export function setSelectedNode(id) {
     setSelectedNodeId(id);
     renderCanvas();
     renderPropertiesPanel();
+}
+
+function removeNodeFromContainerLists(nodeId) {
+    for (let node of state.nodes.values()) {
+        if (!node.properties) continue;
+        if (Array.isArray(node.properties.bodyNodeIds)) {
+            node.properties.bodyNodeIds = node.properties.bodyNodeIds.filter(id => id !== nodeId);
+        }
+        if (Array.isArray(node.properties.trueBodyNodeIds)) {
+            node.properties.trueBodyNodeIds = node.properties.trueBodyNodeIds.filter(id => id !== nodeId);
+        }
+        if (Array.isArray(node.properties.falseBodyNodeIds)) {
+            node.properties.falseBodyNodeIds = node.properties.falseBodyNodeIds.filter(id => id !== nodeId);
+        }
+    }
+}
+
+function isDescendantContainer(maybeAncestorId, nodeId) {
+    let current = state.nodes.get(maybeAncestorId);
+    while (current) {
+        if (current.id === nodeId) return true;
+        if (current.parentId == null) return false;
+        current = state.nodes.get(current.parentId);
+    }
+    return false;
+}
+
+function detachNodeFromParent(node) {
+    if (!node) return;
+    removeNodeFromContainerLists(node.id);
+    node.parentId = null;
+    if (node.properties) delete node.properties.branchSide;
+}
+
+function attachNodeToContainer(targetNode, parentNode, slot) {
+    if (!targetNode || !parentNode || !slot) return false;
+    if (targetNode.id === parentNode.id) return false;
+    if (isDescendantContainer(parentNode.id, targetNode.id)) return false;
+
+    detachNodeFromParent(targetNode);
+
+    targetNode.parentId = parentNode.id;
+    targetNode.localX = Math.max(12, targetNode.localX || 12);
+    targetNode.localY = Math.max(16, targetNode.localY || 16);
+
+    if (slot === 'loopBody') {
+        const arr = Array.isArray(parentNode.properties.bodyNodeIds) ? parentNode.properties.bodyNodeIds : [];
+        if (!arr.includes(targetNode.id)) arr.push(targetNode.id);
+        parentNode.properties.bodyNodeIds = arr;
+        return true;
+    }
+
+    if (slot === 'trueBody' || slot === 'falseBody') {
+        const side = slot === 'trueBody' ? 'true' : 'false';
+        const key = side === 'true' ? 'trueBodyNodeIds' : 'falseBodyNodeIds';
+        const arr = Array.isArray(parentNode.properties[key]) ? parentNode.properties[key] : [];
+        if (!arr.includes(targetNode.id)) arr.push(targetNode.id);
+        parentNode.properties[key] = arr;
+        if (!targetNode.properties) targetNode.properties = {};
+        targetNode.properties.branchSide = side;
+        return true;
+    }
+
+    return false;
 }
 
 // 渲染右侧属性面板
@@ -219,17 +289,28 @@ function renderPropertiesPanel() {
     }
     else if (node.type === 'branch') {
         const boolVal = props.branchCondition === true;
-        html += `<div class="prop-group"><label class="prop-label">分支条件 (运行时选择)</label>
+        const renderBodyList = (ids, sideLabel, actionPrefix) => {
+            const safeIds = Array.isArray(ids) ? ids : [];
+            return safeIds.map((id, idx) => {
+                const n = state.nodes.get(id);
+                const title = n ? `${escapeHtml(n.properties?.name || typeLabel(n.type))} (#${id})` : `Unknown Node (#${id})`;
+                return `<div class="prop-group" style="flex-direction:row; align-items:center; gap:8px;">
+                    <div style="flex:1; font-size:12px;">${idx + 1}. ${title}</div>
+                    <button class="prop-btn" data-action="${actionPrefix}Up" data-idx="${idx}" title="Up">?</button>
+                    <button class="prop-btn" data-action="${actionPrefix}Down" data-idx="${idx}" title="Down">?</button>
+                    <button class="prop-btn" data-action="${actionPrefix}Remove" data-idx="${idx}" title="Remove">??</button>
+                </div>`;
+            }).join('') || `<div class="help-text">${sideLabel} branch body is empty: connect the ${sideLabel} port to a target node to add it.</div>`;
+        };
+        html += `<div class="prop-group"><label class="prop-label">Branch Condition</label>
         <select class="prop-select" data-field="branchCondition">
-            <option value="true" ${boolVal ? 'selected' : ''}>✅ 真分支 (True)</option>
-            <option value="false" ${!boolVal ? 'selected' : ''}>❌ 假分支 (False)</option>
+            <option value="true" ${boolVal ? 'selected' : ''}>True</option>
+            <option value="false" ${!boolVal ? 'selected' : ''}>False</option>
         </select></div>
-        <div class="prop-group"><label class="prop-label">True 分支节点 ID</label>
-        <select class="prop-select" data-field="trueBranchId"><option value="">无</option>${nodeNameOptions(props.trueBranchId)}</select></div>
-        <div class="prop-group"><label class="prop-label">False 分支节点 ID</label>
-        <select class="prop-select" data-field="falseBranchId"><option value="">无</option>${nodeNameOptions(props.falseBranchId)}</select></div>
-        <div class="prop-group"><label class="prop-label">公共后续(可选)</label>
-        <select class="prop-select" data-field="nextNodeId"><option value="">无</option>${nodeNameOptions(props.nextNodeId)}</select></div>`;
+        <div class="prop-group"><label class="prop-label">True Body Nodes</label>${renderBodyList(props.trueBodyNodeIds, "True", "branchTrueBody")}</div>
+        <div class="prop-group"><label class="prop-label">False Body Nodes</label>${renderBodyList(props.falseBodyNodeIds, "False", "branchFalseBody")}</div>
+        <div class="prop-group"><label class="prop-label">Next Node</label>
+        <select class="prop-select" data-field="nextNodeId"><option value="">None</option>${nodeNameOptions(props.nextNodeId)}</select></div>`;
     }
     html += `<div class="help-text">💡 提示: 也可以通过节点右侧的圆点拖拽连线。</div>`;
     propDiv.innerHTML = html;
@@ -258,23 +339,43 @@ function renderPropertiesPanel() {
             addConsoleLog(`更新节点 ${node.id} 属性: ${field}=${val}`, "info");
         });
     });
-
-    // 循环体排序/移除按钮
+    // Container body ordering / removal
     propDiv.querySelectorAll("[data-action]").forEach(btn => {
-        btn.addEventListener("click", (e) => {
+        btn.addEventListener("click", () => {
             const action = btn.getAttribute("data-action");
             const idx = parseInt(btn.getAttribute("data-idx"));
-            if (node.type !== 'loop') return;
-            const arr = Array.isArray(node.properties.bodyNodeIds) ? node.properties.bodyNodeIds : [];
-            if (Number.isNaN(idx) || idx < 0 || idx >= arr.length) return;
-            if (action === "loopBodyRemove") {
-                arr.splice(idx, 1);
-            } else if (action === "loopBodyUp" && idx > 0) {
+            let arr = null;
+            let side = null;
+
+            if (node.type === 'loop' && action.startsWith('loopBody')) {
+                arr = Array.isArray(node.properties.bodyNodeIds) ? node.properties.bodyNodeIds : [];
+            } else if (node.type === 'branch' && action.startsWith('branchTrueBody')) {
+                arr = Array.isArray(node.properties.trueBodyNodeIds) ? node.properties.trueBodyNodeIds : [];
+                side = 'true';
+            } else if (node.type === 'branch' && action.startsWith('branchFalseBody')) {
+                arr = Array.isArray(node.properties.falseBodyNodeIds) ? node.properties.falseBodyNodeIds : [];
+                side = 'false';
+            }
+
+            if (!arr || Number.isNaN(idx) || idx < 0 || idx >= arr.length) return;
+
+            if (action.endsWith('Remove')) {
+                const [removedId] = arr.splice(idx, 1);
+                const removedNode = state.nodes.get(removedId);
+                if (removedNode) {
+                    removedNode.parentId = null;
+                    if (side && removedNode.properties?.branchSide === side) delete removedNode.properties.branchSide;
+                }
+            } else if (action.endsWith('Up') && idx > 0) {
                 [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
-            } else if (action === "loopBodyDown" && idx < arr.length - 1) {
+            } else if (action.endsWith('Down') && idx < arr.length - 1) {
                 [arr[idx + 1], arr[idx]] = [arr[idx], arr[idx + 1]];
             }
-            node.properties.bodyNodeIds = arr;
+
+            if (node.type === 'loop') node.properties.bodyNodeIds = arr;
+            if (action.startsWith('branchTrueBody')) node.properties.trueBodyNodeIds = arr;
+            if (action.startsWith('branchFalseBody')) node.properties.falseBodyNodeIds = arr;
+
             renderCanvas();
             renderPropertiesPanel();
         });
@@ -373,21 +474,50 @@ export function renderCanvas() {
 
     const NODE_W = 180;
     const NODE_H = 80;
+    const LOOP_HEADER_H = 54;
+    const BRANCH_HEADER_H = 54;
+
+    const getNodeBox = (node) => {
+        if (!node) return { width: NODE_W, height: NODE_H };
+        if (node.type === 'loop') {
+            const kids = childrenByParent.get(node.id) || [];
+            const bounds = computeLocalBounds(kids);
+            const pad = 16;
+            const minW = node.properties?.minWidth || 260;
+            const minH = node.properties?.minHeight || 180;
+            return {
+                width: Math.max(minW, bounds.maxX + pad * 2),
+                height: Math.max(minH, LOOP_HEADER_H + bounds.maxY + pad * 2 + 40)
+            };
+        }
+        if (node.type === 'branch') {
+            const kids = childrenByParent.get(node.id) || [];
+            const tKids = kids.filter(k => k.properties?.branchSide === 'true');
+            const fKids = kids.filter(k => k.properties?.branchSide === 'false');
+            const b1 = computeLocalBounds(tKids);
+            const b2 = computeLocalBounds(fKids);
+            const pad = 18;
+            const minW = node.properties?.minWidth || 320;
+            const minH = node.properties?.minHeight || 200;
+            const colW = Math.max(b1.maxX, b2.maxX, 160) + pad * 2;
+            const bodyH = Math.max(b1.maxY, b2.maxY, 140) + pad * 2;
+            return {
+                width: Math.max(minW, colW * 2 + 40),
+                height: Math.max(minH, BRANCH_HEADER_H + bodyH + 40)
+            };
+        }
+        return { width: NODE_W, height: NODE_H };
+    };
 
     const computeLocalBounds = (nodes) => {
         if (!nodes.length) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        let maxX = 0, maxY = 0;
         for (let n of nodes) {
-            minX = Math.min(minX, n.localX);
-            minY = Math.min(minY, n.localY);
-            maxX = Math.max(maxX, n.localX + NODE_W);
-            maxY = Math.max(maxY, n.localY + NODE_H);
+            const box = getNodeBox(n);
+            maxX = Math.max(maxX, (n.localX || 0) + box.width);
+            maxY = Math.max(maxY, (n.localY || 0) + box.height);
         }
-        if (!Number.isFinite(minX)) minX = 0;
-        if (!Number.isFinite(minY)) minY = 0;
-        if (!Number.isFinite(maxX)) maxX = 0;
-        if (!Number.isFinite(maxY)) maxY = 0;
-        return { minX, minY, maxX, maxY };
+        return { minX: 0, minY: 0, maxX, maxY };
     };
 
     const renderNode = (node, mountEl, mode) => {
@@ -414,7 +544,11 @@ export function renderCanvas() {
             const cnt = (Array.isArray(node.properties.bodyNodeIds) ? node.properties.bodyNodeIds.length : 0);
             bodyPreview = `🔁 条件: ${escapeHtml(condText)}<br/>循环体: ${cnt} 个节点`;
         }
-        else if(node.type === 'branch') bodyPreview = `🌿 条件: ${node.properties.branchCondition ? "真分支" : "假分支"}`;
+        else if(node.type === 'branch') {
+            const tCnt = Array.isArray(node.properties.trueBodyNodeIds) ? node.properties.trueBodyNodeIds.length : (node.properties.trueBranchId ? 1 : 0);
+            const fCnt = Array.isArray(node.properties.falseBodyNodeIds) ? node.properties.falseBodyNodeIds.length : (node.properties.falseBranchId ? 1 : 0);
+            bodyPreview = `Branch: ${node.properties.branchCondition ? "True" : "False"}<br/>True: ${tCnt} / False: ${fCnt}`;
+        }
         else if(node.type === 'start') bodyPreview = "入口节点";
         else bodyPreview = node.properties.comment || "顺序节点";
 
@@ -488,8 +622,8 @@ export function renderCanvas() {
             const headerH = node.properties.headerHeight || 54;
             const minW = node.properties.minWidth || 260;
             const minH = node.properties.minHeight || 180;
-            const w = Math.max(minW, bounds.maxX - bounds.minX + pad * 2);
-            const h = Math.max(minH, headerH + (bounds.maxY - bounds.minY) + pad * 2 + 40);
+            const w = Math.max(minW, bounds.maxX + pad * 2);
+            const h = Math.max(minH, headerH + bounds.maxY + pad * 2 + 40);
             nodeDiv.style.width = w + 'px';
             nodeDiv.style.height = h + 'px';
             const container = nodeDiv.querySelector('.container-children');
@@ -505,8 +639,8 @@ export function renderCanvas() {
             const headerH = node.properties.headerHeight || 54;
             const minW = node.properties.minWidth || 320;
             const minH = node.properties.minHeight || 200;
-            const colW = Math.max((b1.maxX - b1.minX), (b2.maxX - b2.minX), 160) + pad * 2;
-            const bodyH = Math.max((b1.maxY - b1.minY), (b2.maxY - b2.minY), 140) + pad * 2;
+            const colW = Math.max(b1.maxX, b2.maxX, 160) + pad * 2;
+            const bodyH = Math.max(b1.maxY, b2.maxY, 140) + pad * 2;
             const w = Math.max(minW, colW * 2 + 40);
             const h = Math.max(minH, headerH + bodyH + 40);
             nodeDiv.style.width = w + 'px';
@@ -620,7 +754,13 @@ function onGlobalMouseMove(e) {
         if (node.parentId != null) {
             const nodeElem = canvasDiv.querySelector(`.flow-node[data-id="${node.parentId}"]`);
             // 子节点所在容器（循环体/分支体）
-            const host = document.querySelector(`.flow-node[data-id="${node.parentId}"] .container-children, .flow-node[data-id="${node.parentId}"] .branch-col[data-branch="${node.properties?.branchSide || 'true'}"]`);
+            const parentNode = state.nodes.get(node.parentId);
+            let host = null;
+            if (parentNode?.type === 'loop') {
+                host = document.querySelector(`.flow-node[data-id="${node.parentId}"] .container-children`);
+            } else if (parentNode?.type === 'branch') {
+                host = document.querySelector(`.flow-node[data-id="${node.parentId}"] .branch-col[data-branch="${node.properties?.branchSide || 'true'}"]`);
+            }
             const rect = (host || nodeElem)?.getBoundingClientRect();
             if (!rect) return;
             const newX = e.clientX - dragOffsetX - rect.left;
@@ -739,33 +879,22 @@ function createConnection(sourceId, targetId, fieldOverride = null) {
     if (fieldOverride) {
         if (fieldOverride === 'loopBody') {
             if (sourceNode.type !== 'loop') return;
-            const arr = Array.isArray(sourceNode.properties.bodyNodeIds) ? sourceNode.properties.bodyNodeIds : [];
-            if (!arr.includes(targetId)) arr.push(targetId);
-            sourceNode.properties.bodyNodeIds = arr;
-            // 重新挂载到循环容器内部（可嵌套）
-            targetNode.parentId = sourceId;
-            targetNode.localX = Math.max(10, (targetNode.localX || 10));
-            targetNode.localY = Math.max(10, (targetNode.localY || 10));
-            targetNode.x = sourceNode.x + 40;
-            targetNode.y = sourceNode.y + 90;
-            addConsoleLog(`加入循环体: ${sourceId} += ${targetId}`, "info");
+            if (!attachNodeToContainer(targetNode, sourceNode, 'loopBody')) {
+                addConsoleLog(`Cannot place node ${targetId} into container ${sourceId}: nesting would create a cycle`, "error");
+                return;
+            }
+            addConsoleLog(`Added to loop body: ${sourceId} += ${targetId}`, "info");
             renderCanvas();
             if (state.selectedNodeId === sourceId) renderPropertiesPanel();
             return;
         }
         if (fieldOverride === 'trueBody' || fieldOverride === 'falseBody') {
             if (sourceNode.type !== 'branch') return;
-            const side = fieldOverride === 'trueBody' ? 'true' : 'false';
-            const key = side === 'true' ? 'trueBodyNodeIds' : 'falseBodyNodeIds';
-            const arr = Array.isArray(sourceNode.properties[key]) ? sourceNode.properties[key] : [];
-            if (!arr.includes(targetId)) arr.push(targetId);
-            sourceNode.properties[key] = arr;
-            targetNode.parentId = sourceId;
-            if (!targetNode.properties) targetNode.properties = {};
-            targetNode.properties.branchSide = side;
-            targetNode.localX = Math.max(10, (targetNode.localX || 10));
-            targetNode.localY = Math.max(20, (targetNode.localY || 20));
-            addConsoleLog(`加入分支体(${side}): ${sourceId} += ${targetId}`, "info");
+            if (!attachNodeToContainer(targetNode, sourceNode, fieldOverride)) {
+                addConsoleLog(`Cannot place node ${targetId} into container ${sourceId}: nesting would create a cycle`, "error");
+                return;
+            }
+            addConsoleLog(`Added to branch body: ${sourceId} += ${targetId} (${fieldOverride})`, "info");
             renderCanvas();
             if (state.selectedNodeId === sourceId) renderPropertiesPanel();
             return;

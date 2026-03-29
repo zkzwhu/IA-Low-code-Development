@@ -127,8 +127,10 @@ def _step_once(sess):
             goto(bid)
     elif ntype == 'branch':
         cond = props.get('branchCondition', True)
-        t = props.get('trueBranchId')
-        f = props.get('falseBranchId')
+        t_list = props.get('trueBodyNodeIds') or []
+        f_list = props.get('falseBodyNodeIds') or []
+        t = t_list[0] if t_list else props.get('trueBranchId')
+        f = f_list[0] if f_list else props.get('falseBranchId')
         logs.append(f"🌿 分支判断: {cond}")
         goto(t if cond else f)
     else:
@@ -309,15 +311,25 @@ def execute_workflow():
 
         elif node_type == 'branch':
             condition = props.get('branchCondition', True)
-            true_branch = props.get('trueBranchId')
-            false_branch = props.get('falseBranchId')
+            true_branch_ids = props.get('trueBodyNodeIds') or []
+            false_branch_ids = props.get('falseBodyNodeIds') or []
+            true_branch = true_branch_ids[0] if true_branch_ids else props.get('trueBranchId')
+            false_branch = false_branch_ids[0] if false_branch_ids else props.get('falseBranchId')
             add_log(f"{indent}🌿 分支判断: 条件 = {'真' if condition else '假'}")
-            if condition and true_branch:
-                exec_node(true_branch, depth + 1)
-            elif not condition and false_branch:
-                exec_node(false_branch, depth + 1)
+            if condition and (true_branch_ids or true_branch):
+                if true_branch_ids:
+                    for bid in true_branch_ids:
+                        exec_node(bid, depth + 1)
+                else:
+                    exec_node(true_branch, depth + 1)
+            elif not condition and (false_branch_ids or false_branch):
+                if false_branch_ids:
+                    for bid in false_branch_ids:
+                        exec_node(bid, depth + 1)
+                else:
+                    exec_node(false_branch, depth + 1)
             else:
-                add_log(f"{indent}  ⚠️ 未选择有效分支")
+                add_log(f"{indent}  No valid branch selected")
             next_id = props.get('nextNodeId')
             exec_node(next_id, depth)
 
