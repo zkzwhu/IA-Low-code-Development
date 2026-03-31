@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧农业低代码平台 - 工作流编辑器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-container">
+    <!-- 菜单栏 -->
+    <div class="menu-bar">
+        <div class="title">🌾 智慧农业低代码平台 · 工作流编辑器</div>
+
+        <!-- 文件菜单 -->
+        <div class="menu-item has-submenu">
+            文件
+            <div class="submenu">
+                <div class="submenu-item" id="newProjectBtn">📄 新建项目</div>
+                <div class="submenu-item" id="saveProjectBtn">💾 保存项目</div>
+                <div class="submenu-item" id="loadProjectBtn">📂 加载项目</div>
+            </div>
+        </div>
+
+        <!-- 编辑菜单 -->
+        <div class="menu-item has-submenu">
+            编辑
+            <div class="submenu">
+                <div class="submenu-item" id="deleteSelectedBtn">🗑️ 删除选中节点</div>
+                <div class="submenu-item" id="clearCanvasBtn">🧹 清空画布</div>
+            </div>
+        </div>
+
+        <!-- 项目菜单 -->
+        <div class="menu-item has-submenu">
+            项目
+            <div class="submenu">
+                <div class="submenu-item" id="exportProjectBtn">📎 导出JSON</div>
+                <div class="submenu-item" id="importProjectBtn">📥 导入JSON</div>
+            </div>
+        </div>
+
+        <!-- 设置菜单 -->
+        <div class="menu-item has-submenu">
+            设置
+            <div class="submenu">
+                <div class="submenu-item" id="consoleSettingBtn">⚙️ 控制台输出模式</div>
+                <div class="submenu-item" id="tipsSettingBtn">🛈 使用提示</div>
+            </div>
+        </div>
+
+        <!-- 窗口菜单（预留） -->
+        <div class="menu-item has-submenu">
+            窗口
+            <div class="submenu">
+                <div class="submenu-item" id="resetViewBtn">重置视图</div>
+                <div class="submenu-item" id="helpBtn">帮助</div>
+                <div class="submenu-item" id="aboutBtn">关于</div>
+            </div>
+        </div>
+
+        <div class="top-right">
+            <button class="run-button" id="runWorkflowBtn" title="运行工作流">▶ 运行工作流</button>
+            <button class="run-button" id="startDebugBtn" title="进入调试模式" style="background:#2c7da0;">🐞 调试</button>
+            <button class="run-button" id="debugContinueBtn" title="继续运行（到断点/结束）" style="background:#34495e;" disabled>⏵ 继续</button>
+            <button class="run-button" id="debugStepBtn" title="单步执行" style="background:#34495e;" disabled>⤼ 单步</button>
+            <button class="run-button" id="debugStopBtn" title="停止调试" style="background:#7f8c8d;" disabled>⏹ 停止</button>
+        </div>
+    </div>
+
+    <div class="main-layout">
+        <!-- 左侧组件库 -->
+        <div class="components-panel">
+            <div class="panel-header">📦 组件库</div>
+            <div class="components-hint">先点击大节点，再展开并拖拽对应组件到画布</div>
+            <div class="components-list" id="componentsLibrary"></div>
+        </div>
+
+        <!-- 中间画布区 -->
+        <div class="canvas-panel">
+            <div class="canvas-toolbar" id="canvasToolbar">
+                <button class="toolbar-btn active" id="selectToolBtn" data-tool="select" title="閫夋嫨 / 绉诲姩鑺傜偣">閫夋嫨</button>
+                <button class="toolbar-btn" id="connectToolBtn" data-tool="connect" title="杩涘叆杩炵嚎妯″紡">杩炵嚎</button>
+                <button class="toolbar-btn" id="deleteToolBtn" data-tool="delete" title="鍒犻櫎鑺傜偣锛氱偣鍑诲垹闄ゆ垨鎸変綇宸﹂敭鎷栧姩鎿﹂櫎">鍒犻櫎</button>
+                <button class="toolbar-btn toolbar-action-btn" id="arrangeCanvasBtn" title="鎸夋墽琛岄€昏緫鏁寸悊鐢诲竷">鏁寸悊鑺傜偣</button>
+                <div class="toolbar-tip" id="canvasToolHint">宸︿欢閫夋嫨妯″紡锛涘彸閿寜浣忓彲鎷栨嫿鐢诲竷</div>
+            </div>
+            <div class="canvas-area" id="canvasArea">
+                <div id="canvas" style="position: relative; min-height: 100%; min-width: 100%;">
+                    <svg id="connectionsSvg" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none;"></svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧属性面板 -->
+        <div class="properties-panel" id="propsPanel">
+            <div class="prop-header">⚙️ 属性配置</div>
+            <div class="prop-content" id="propContent">
+                <div class="help-text">点击画布中的节点查看并修改属性</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部控制台 -->
+    <div class="console-panel">
+        <div class="console-header">
+            <span>📟 运行控制台</span>
+            <button class="clear-console" id="clearConsoleBtn" title="清空控制台输出">清空</button>
+        </div>
+        <div class="console-split">
+            <div class="console-output" id="consoleOutput">
+                <div class="log-line">✨ 就绪，拖拽组件至画布构建工作流，点击运行查看效果。</div>
+            </div>
+            <div class="debug-panel" id="debugPanel" style="display:none;">
+                <div class="debug-title">🐞 调试信息</div>
+                <div class="debug-section">
+                    <div class="debug-section-title">当前节点 / 调用栈</div>
+                    <div class="debug-box" id="debugStackBox">（未开始）</div>
+                </div>
+                <div class="debug-section">
+                    <div class="debug-section-title">变量</div>
+                    <div class="debug-box" id="debugVarsBox">（未开始）</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 简易可视化弹窗容器 -->
+<div class="modal-mask" id="modalMask" style="display:none;">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modalTitle">标题</div>
+            <button class="modal-close" id="modalCloseBtn" title="关闭">✕</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-footer" id="modalFooter">
+            <button class="modal-btn" id="modalCancelBtn" title="取消">取消</button>
+            <button class="modal-btn primary" id="modalOkBtn" title="确定">确定</button>
+        </div>
+    </div>
+</div>
+
+    <script type="module" src="{{ url_for('static', filename='appMain.js') }}"></script>
+</body>
+</html>
