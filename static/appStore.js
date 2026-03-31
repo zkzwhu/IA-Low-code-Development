@@ -7,7 +7,8 @@ export const state = {
     consoleMode: 'detail',
     activeConsoleTab: 'run',
     debugCurrentNodeId: null,
-    activeCanvasTool: 'select'
+    activeCanvasTool: 'select',
+    canvasZoom: 1
 };
 
 if (typeof window !== 'undefined') {
@@ -60,7 +61,13 @@ export function setDebugCurrentNodeId(id) {
 }
 
 export function setActiveCanvasTool(tool) {
-    if (tool === 'select' || tool === 'connect' || tool === 'delete') {
+    if (tool === 'select' || tool === 'connect' || tool === 'delete' || tool === 'zoom') {
         state.activeCanvasTool = tool;
     }
+}
+
+export function setCanvasZoom(zoom) {
+    const numericZoom = Number(zoom);
+    if (!Number.isFinite(numericZoom)) return;
+    state.canvasZoom = Math.min(2, Math.max(0.5, numericZoom));
 }

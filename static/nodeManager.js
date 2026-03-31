@@ -1035,7 +1035,7 @@ function renderPropertiesPanel() {
     const selectedIds = getSelectedNodeIds();
     const selectedNodes = selectedIds.map(id => state.nodes.get(id)).filter(Boolean);
     if (!selectedNodes.length) {
-        propDiv.innerHTML = '<div class="help-text">点击画布中的节点查看并修改属性；按住 Ctrl 再左键可多选节点。</div>';
+        propDiv.innerHTML = '<div class="help-text">点击画布中的节点查看并修改属性；按住 Ctrl 再左键可多选，或在空白处左键拖拽进行框选。</div>';
         return;
     }
 
@@ -1048,11 +1048,11 @@ function renderPropertiesPanel() {
     let html = '';
     if (selectedNodes.length === 1) {
         html = renderNodePropertyEditor(selectedNodes[0]);
-        html += `<div class="help-text">提示：可以通过节点右侧端口拖拽连线；按住 Ctrl 再左键可继续多选。</div>`;
+        html += `<div class="help-text">提示：可以通过节点右侧端口拖拽连线；按住 Ctrl 再左键可继续多选，也可在空白处左键拖拽框选。</div>`;
     } else {
         html = `<div class="prop-group">
             <div class="prop-label">已选中 ${selectedNodes.length} 个节点</div>
-            <div class="help-text">点击节点名称可展开具体属性，Ctrl + 左键可继续增减选择。</div>
+            <div class="help-text">点击节点名称可展开具体属性，Ctrl + 左键可继续增减选择，也可继续框选补充节点。</div>
         </div>`;
         html += selectedNodes
             .map(node => renderNodePropertyEditor(node, { collapsible: true, open: expandedIds.has(node.id) }))
@@ -1183,6 +1183,7 @@ function drawConnections() {
     svg.appendChild(defs);
     const canvasDiv = document.getElementById("canvas");
     const containerRect = canvasDiv.getBoundingClientRect();
+    const zoom = getCanvasZoom();
 
     // 不同连线含义使用不同颜色，便于“可视化编辑”。
     const fieldColor = {
@@ -1218,12 +1219,12 @@ function drawConnections() {
             if (!sourcePoint || !targetElem) continue;
 
             const sourcePointRect = sourcePoint.getBoundingClientRect();
-            const startX = sourcePointRect.right - containerRect.left;
-            const startY = sourcePointRect.top + sourcePointRect.height / 2 - containerRect.top;
+            const startX = (sourcePointRect.right - containerRect.left) / zoom;
+            const startY = (sourcePointRect.top + sourcePointRect.height / 2 - containerRect.top) / zoom;
 
             const targetRect = targetElem.getBoundingClientRect();
-            const endX = targetRect.left - containerRect.left + 10;
-            const endY = targetRect.top + targetRect.height / 2 - containerRect.top;
+            const endX = (targetRect.left - containerRect.left + 10) / zoom;
+            const endY = (targetRect.top + targetRect.height / 2 - containerRect.top) / zoom;
 
             const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
             line.setAttribute("x1", startX);
@@ -1241,6 +1242,7 @@ function drawConnections() {
 export function renderCanvas() {
     const canvasDiv = document.getElementById("canvas");
     const canvasArea = document.getElementById("canvasArea");
+    const canvasViewport = document.getElementById("canvasViewport");
     if (!canvasDiv) return;
     // 移除所有节点元素（含容器内部）
     canvasDiv.querySelectorAll('.flow-node').forEach(div => div.remove());
@@ -1250,6 +1252,7 @@ export function renderCanvas() {
 
     if (canvasArea) {
         canvasArea.classList.toggle('tool-connect', state.activeCanvasTool === 'connect');
+        canvasArea.classList.toggle('tool-zoom', state.activeCanvasTool === 'zoom');
         canvasArea.classList.toggle('tool-delete', state.activeCanvasTool === 'delete');
     }
     canvasDiv.classList.toggle('delete-sweep-active', isDeleteSweeping);
@@ -1377,6 +1380,10 @@ export function renderCanvas() {
         nodeDiv.addEventListener("click", (e) => {
             e.stopPropagation();
             if (ignoreNextClick) { ignoreNextClick = false; return; }
+            if (state.activeCanvasTool === 'zoom') {
+                e.preventDefault();
+                return;
+            }
             if (e.target?.getAttribute && e.target.getAttribute('data-action') === 'toggleBreakpoint') {
                 const beforeSnapshot = snapshotCanvasState();
                 node.properties.breakpoint = !node.properties.breakpoint;
@@ -1464,12 +1471,20 @@ export function renderCanvas() {
         maxX = Math.max(maxX, (node.x || 0) + box.width + CANVAS_PADDING);
         maxY = Math.max(maxY, (node.y || 0) + box.height + CANVAS_PADDING);
     }
-    canvasDiv.style.width = `${Math.max(maxX, (canvasArea?.clientWidth || 0) + 1)}px`;
-    canvasDiv.style.height = `${Math.max(maxY, (canvasArea?.clientHeight || 0) + 1)}px`;
+    const zoom = getCanvasZoom();
+    const logicalWidth = Math.max(maxX, ((canvasArea?.clientWidth || 0) / zoom) + 1);
+    const logicalHeight = Math.max(maxY, ((canvasArea?.clientHeight || 0) / zoom) + 1);
+    canvasDiv.style.width = `${logicalWidth}px`;
+    canvasDiv.style.height = `${logicalHeight}px`;
+    canvasDiv.style.transform = `scale(${zoom})`;
+    if (canvasViewport) {
+        canvasViewport.style.width = `${Math.max(logicalWidth * zoom, (canvasArea?.clientWidth || 0) + 1)}px`;
+        canvasViewport.style.height = `${Math.max(logicalHeight * zoom, (canvasArea?.clientHeight || 0) + 1)}px`;
+    }
     const svg = document.getElementById('connectionsSvg');
     if (svg) {
-        svg.setAttribute('width', canvasDiv.style.width);
-        svg.setAttribute('height', canvasDiv.style.height);
+        svg.setAttribute('width', `${logicalWidth}`);
+        svg.setAttribute('height', `${logicalHeight}`);
     }
 
     document.querySelectorAll('.connect-point').forEach(point => {
@@ -1509,6 +1524,12 @@ let deleteSweepMarker = null;
 let lastDeletePoint = null;
 let deleteSweepStartSnapshot = null;
 let didDeleteSweepNodes = false;
+let isBoxSelecting = false;
+let boxSelectStartPoint = null;
+let boxSelectCurrentPoint = null;
+let boxSelectBaseSelection = [];
+let didBoxSelectMove = false;
+let boxSelectionOverlay = null;
 let dragStartNodePosition = null;
 let dragStartCanvasSnapshot = null;
 let portDragStartSnapshot = null;
@@ -1524,13 +1545,127 @@ function cloneData(value) {
     return JSON.parse(JSON.stringify(value ?? null));
 }
 
+function getCanvasZoom() {
+    const zoom = Number(state.canvasZoom);
+    return Number.isFinite(zoom) ? Math.min(2, Math.max(0.5, zoom)) : 1;
+}
+
+function normalizeCanvasRect(a, b) {
+    return {
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(a.x - b.x),
+        height: Math.abs(a.y - b.y)
+    };
+}
+
+function syncRenderedSelectionClasses() {
+    const selectedIds = new Set(getSelectedNodeIds());
+    document.querySelectorAll('.flow-node').forEach(nodeEl => {
+        const nodeId = Number(nodeEl.getAttribute('data-id'));
+        nodeEl.classList.toggle('selected', selectedIds.has(nodeId));
+    });
+}
+
+function getRenderedNodeLogicalRect(nodeId) {
+    const canvasDiv = document.getElementById("canvas");
+    const nodeEl = canvasDiv?.querySelector(`.flow-node[data-id="${nodeId}"]`);
+    if (!canvasDiv || !nodeEl) return null;
+
+    const zoom = getCanvasZoom();
+    const canvasRect = canvasDiv.getBoundingClientRect();
+    const nodeRect = nodeEl.getBoundingClientRect();
+    return {
+        x: (nodeRect.left - canvasRect.left) / zoom,
+        y: (nodeRect.top - canvasRect.top) / zoom,
+        width: nodeRect.width / zoom,
+        height: nodeRect.height / zoom
+    };
+}
+
+function rectIntersects(a, b) {
+    return a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y;
+}
+
+function ensureBoxSelectionOverlay() {
+    const canvasDiv = document.getElementById("canvas");
+    if (!canvasDiv) return null;
+    if (!boxSelectionOverlay) {
+        boxSelectionOverlay = document.createElement('div');
+        boxSelectionOverlay.className = 'box-selection';
+        canvasDiv.appendChild(boxSelectionOverlay);
+    }
+    return boxSelectionOverlay;
+}
+
+function hideBoxSelectionOverlay() {
+    if (boxSelectionOverlay) {
+        boxSelectionOverlay.remove();
+        boxSelectionOverlay = null;
+    }
+}
+
+function updateBoxSelectionOverlay() {
+    if (!boxSelectStartPoint || !boxSelectCurrentPoint) return;
+    const overlay = ensureBoxSelectionOverlay();
+    if (!overlay) return;
+
+    const rect = normalizeCanvasRect(boxSelectStartPoint, boxSelectCurrentPoint);
+    overlay.style.left = `${rect.x}px`;
+    overlay.style.top = `${rect.y}px`;
+    overlay.style.width = `${rect.width}px`;
+    overlay.style.height = `${rect.height}px`;
+}
+
+function applyBoxSelection() {
+    if (!boxSelectStartPoint || !boxSelectCurrentPoint) return;
+
+    const selectionRect = normalizeCanvasRect(boxSelectStartPoint, boxSelectCurrentPoint);
+    const hitIds = [];
+    for (let node of state.nodes.values()) {
+        const renderedRect = getRenderedNodeLogicalRect(node.id);
+        if (!renderedRect) continue;
+        if (rectIntersects(selectionRect, renderedRect)) hitIds.push(node.id);
+    }
+
+    const mergedIds = Array.from(new Set([...(boxSelectBaseSelection || []), ...hitIds]));
+    const primaryId = mergedIds[mergedIds.length - 1] ?? null;
+    updateSelection(mergedIds, primaryId, mergedIds);
+    syncRenderedSelectionClasses();
+    renderPropertiesPanel();
+}
+
+function beginBoxSelection(e) {
+    if (state.activeCanvasTool !== 'select' || e.button !== 0) return false;
+    isBoxSelecting = true;
+    boxSelectStartPoint = getCanvasPointFromClient(e.clientX, e.clientY);
+    boxSelectCurrentPoint = boxSelectStartPoint;
+    boxSelectBaseSelection = (e.ctrlKey || e.metaKey) ? getSelectedNodeIds() : [];
+    didBoxSelectMove = false;
+    hideBoxSelectionOverlay();
+    return true;
+}
+
+function finishBoxSelection() {
+    isBoxSelecting = false;
+    boxSelectStartPoint = null;
+    boxSelectCurrentPoint = null;
+    boxSelectBaseSelection = [];
+    didBoxSelectMove = false;
+    hideBoxSelectionOverlay();
+}
+
 function getCanvasPointFromClient(clientX, clientY) {
     const canvasArea = document.getElementById("canvasArea");
     if (!canvasArea) return { x: CANVAS_PADDING, y: CANVAS_PADDING };
     const rect = canvasArea.getBoundingClientRect();
+    const zoom = getCanvasZoom();
     return {
-        x: clientX - rect.left + canvasArea.scrollLeft,
-        y: clientY - rect.top + canvasArea.scrollTop
+        x: (clientX - rect.left + canvasArea.scrollLeft) / zoom,
+        y: (clientY - rect.top + canvasArea.scrollTop) / zoom
     };
 }
 
@@ -1541,9 +1676,10 @@ function getRenderedCanvasPosition(node) {
     if (canvasDiv && nodeEl) {
         const canvasRect = canvasDiv.getBoundingClientRect();
         const nodeRect = nodeEl.getBoundingClientRect();
+        const zoom = getCanvasZoom();
         return {
-            x: nodeRect.left - canvasRect.left,
-            y: nodeRect.top - canvasRect.top
+            x: (nodeRect.left - canvasRect.left) / zoom,
+            y: (nodeRect.top - canvasRect.top) / zoom
         };
     }
     return node.parentId == null
@@ -1630,9 +1766,10 @@ function serializeNodesForClipboard(nodeIds) {
 function getDefaultPastePoint() {
     const canvasArea = document.getElementById("canvasArea");
     if (!canvasArea) return { x: CANVAS_PADDING, y: CANVAS_PADDING };
+    const zoom = getCanvasZoom();
     return {
-        x: canvasArea.scrollLeft + CANVAS_PADDING,
-        y: canvasArea.scrollTop + CANVAS_PADDING
+        x: (canvasArea.scrollLeft / zoom) + CANVAS_PADDING,
+        y: (canvasArea.scrollTop / zoom) + CANVAS_PADDING
     };
 }
 
@@ -1814,18 +1951,19 @@ export function pasteClipboardNodes() {
 function updateDeleteSweepMarker(clientX, clientY) {
     const canvasDiv = document.getElementById("canvas");
     if (!canvasDiv) return;
+    const zoom = getCanvasZoom();
 
     if (!deleteSweepMarker) {
         deleteSweepMarker = document.createElement('div');
         deleteSweepMarker.className = 'delete-sweep';
-        deleteSweepMarker.style.width = `${DELETE_SWEEP_RADIUS * 2}px`;
-        deleteSweepMarker.style.height = `${DELETE_SWEEP_RADIUS * 2}px`;
         canvasDiv.appendChild(deleteSweepMarker);
     }
+    deleteSweepMarker.style.width = `${(DELETE_SWEEP_RADIUS * 2) / zoom}px`;
+    deleteSweepMarker.style.height = `${(DELETE_SWEEP_RADIUS * 2) / zoom}px`;
 
     const rect = canvasDiv.getBoundingClientRect();
-    deleteSweepMarker.style.left = `${clientX - rect.left}px`;
-    deleteSweepMarker.style.top = `${clientY - rect.top}px`;
+    deleteSweepMarker.style.left = `${(clientX - rect.left) / zoom}px`;
+    deleteSweepMarker.style.top = `${(clientY - rect.top) / zoom}px`;
 }
 
 function finishDeleteSweep() {
@@ -1908,13 +2046,21 @@ function onCanvasAreaMouseDown(e) {
 
     if (e.button !== 0) return;
 
+    if (state.activeCanvasTool === 'zoom') {
+        e.preventDefault();
+        return;
+    }
+
     if (state.activeCanvasTool === 'delete' && !e.target.closest('.flow-node')) {
         beginDeleteSweep(e);
         return;
     }
 
-    if (!e.target.closest('.flow-node') && !e.target.closest('.connect-point') && !(e.ctrlKey || e.metaKey)) {
-        setSelectedNode(null);
+    if (!e.target.closest('.flow-node') && !e.target.closest('.connect-point')) {
+        if (beginBoxSelection(e)) {
+            e.preventDefault();
+            return;
+        }
     }
 }
 
@@ -1962,6 +2108,7 @@ function setupCanvasInteractions() {
 function onConnectPointMouseDown(e) {
     if (e.button !== 0) return;
     if (e.altKey) return;
+    if (state.activeCanvasTool === 'zoom' || state.activeCanvasTool === 'delete') return;
     e.stopPropagation();
     const nodeId = parseInt(e.target.getAttribute('data-id'));
     const field = e.target.getAttribute('data-field') || null;
@@ -1984,9 +2131,23 @@ function onConnectPointMouseDown(e) {
 function onGlobalMouseMove(e) {
     const canvasDiv = document.getElementById("canvas");
     const canvasArea = document.getElementById("canvasArea");
+    const zoom = getCanvasZoom();
     if (isPanningCanvas && canvasArea) {
         canvasArea.scrollLeft = panStartScrollLeft - (e.clientX - panStartX);
         canvasArea.scrollTop = panStartScrollTop - (e.clientY - panStartY);
+        return;
+    }
+    if (isBoxSelecting) {
+        boxSelectCurrentPoint = getCanvasPointFromClient(e.clientX, e.clientY);
+        const dx = Math.abs(boxSelectCurrentPoint.x - boxSelectStartPoint.x);
+        const dy = Math.abs(boxSelectCurrentPoint.y - boxSelectStartPoint.y);
+        if (!didBoxSelectMove && (dx >= 6 || dy >= 6)) {
+            didBoxSelectMove = true;
+        }
+        if (didBoxSelectMove) {
+            updateBoxSelectionOverlay();
+            applyBoxSelection();
+        }
         return;
     }
     if (isDeleteSweeping) {
@@ -2008,15 +2169,15 @@ function onGlobalMouseMove(e) {
             }
             const rect = (host || nodeElem)?.getBoundingClientRect();
             if (!rect) return;
-            const newX = e.clientX - dragOffsetX - rect.left;
-            const newY = e.clientY - dragOffsetY - rect.top;
+            const newX = (e.clientX - dragOffsetX - rect.left) / zoom;
+            const newY = (e.clientY - dragOffsetY - rect.top) / zoom;
             node.localX = Math.max(12, newX);
             node.localY = Math.max(16, newY);
             syncContainerOrderFromPositions(parentNode);
         } else {
             const containerRect = canvasArea.getBoundingClientRect();
-            const newX = e.clientX - dragOffsetX - containerRect.left + canvasArea.scrollLeft;
-            const newY = e.clientY - dragOffsetY - containerRect.top + canvasArea.scrollTop;
+            const newX = (e.clientX - dragOffsetX - containerRect.left + canvasArea.scrollLeft) / zoom;
+            const newY = (e.clientY - dragOffsetY - containerRect.top + canvasArea.scrollTop) / zoom;
             node.x = Math.max(CANVAS_PADDING / 2, newX);
             node.y = Math.max(CANVAS_PADDING / 2, newY);
         }
@@ -2047,18 +2208,18 @@ function onGlobalMouseMove(e) {
                 : null;
             if (sourcePoint) {
                 const sourcePointRect = sourcePoint.getBoundingClientRect();
-                startX = sourcePointRect.right - containerRect.left;
-                startY = sourcePointRect.top + sourcePointRect.height / 2 - containerRect.top;
+                startX = (sourcePointRect.right - containerRect.left) / zoom;
+                startY = (sourcePointRect.top + sourcePointRect.height / 2 - containerRect.top) / zoom;
             } else {
                 const sourceElem = canvasDiv.querySelector(`.flow-node[data-id="${draggingFromNodeId}"]`);
                 if (sourceElem) {
                     const sourceRect = sourceElem.getBoundingClientRect();
-                    startX = sourceRect.right - containerRect.left - 5;
-                    startY = sourceRect.top + sourceRect.height/2 - containerRect.top;
+                    startX = (sourceRect.right - containerRect.left - 5) / zoom;
+                    startY = (sourceRect.top + sourceRect.height/2 - containerRect.top) / zoom;
                 }
             }
-                const endX = e.clientX - containerRect.left;
-                const endY = e.clientY - containerRect.top;
+                const endX = (e.clientX - containerRect.left) / zoom;
+                const endY = (e.clientY - containerRect.top) / zoom;
                 if (!tempLine) {
                     const svg = document.getElementById("connectionsSvg");
                     tempLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -2081,6 +2242,17 @@ function onGlobalMouseUp(e) {
     if (isPanningCanvas) {
         isPanningCanvas = false;
         if (canvasArea) canvasArea.classList.remove('panning');
+    }
+    if (isBoxSelecting) {
+        if (didBoxSelectMove) {
+            applyBoxSelection();
+        } else if (!(e.ctrlKey || e.metaKey)) {
+            updateSelection([], null, []);
+            syncRenderedSelectionClasses();
+            renderPropertiesPanel();
+        }
+        finishBoxSelection();
+        return;
     }
     if (isDeleteSweeping) {
         if (didDeleteSweepNodes) pushUndoSnapshot(deleteSweepStartSnapshot);
@@ -2152,6 +2324,17 @@ function createConnection(sourceId, targetId, fieldOverride = null) {
     const sourceNode = state.nodes.get(sourceId);
     const targetNode = state.nodes.get(targetId);
     if (!sourceNode || !targetNode) return;
+
+    const isDirectContainerRelation =
+        sourceNode.parentId === targetNode.id || targetNode.parentId === sourceNode.id;
+    const isContainerBodyConnection =
+        fieldOverride === 'loopBody' || fieldOverride === 'trueBody' || fieldOverride === 'falseBody';
+
+    if (isDirectContainerRelation && !isContainerBodyConnection) {
+        addConsoleLog('不允许循环体/分支体中的节点与其所在容器节点直接连线。', 'error');
+        return;
+    }
+
     const beforeSnapshot = snapshotCanvasState();
     if (sourceNode.parentId != null && sourceNode.parentId !== targetNode.parentId) {
         attachNodeIntoSourceContainer(targetNode, sourceNode);
@@ -2203,11 +2386,19 @@ function createConnection(sourceId, targetId, fieldOverride = null) {
     }
 
     if (fieldOptions.length === 1) {
+        if (isDirectContainerRelation && fieldOptions[0] !== 'loopBody' && fieldOptions[0] !== 'trueBody' && fieldOptions[0] !== 'falseBody') {
+            addConsoleLog('不允许循环体/分支体中的节点与其所在容器节点直接连线。', 'error');
+            return;
+        }
         sourceNode.properties[fieldOptions[0]] = targetId;
         addConsoleLog(`连接: ${sourceId} → ${targetId} (${fieldOptions[0]})`, "info");
     } else {
         const choice = prompt(`请选择连接类型:\n${fieldOptions.join(', ')}`, fieldOptions[0]);
         if (choice && fieldOptions.includes(choice)) {
+            if (isDirectContainerRelation && choice !== 'loopBody' && choice !== 'trueBody' && choice !== 'falseBody') {
+                addConsoleLog('不允许循环体/分支体中的节点与其所在容器节点直接连线。', 'error');
+                return;
+            }
             sourceNode.properties[choice] = targetId;
             addConsoleLog(`连接: ${sourceId} → ${targetId} (${choice})`, "info");
         }

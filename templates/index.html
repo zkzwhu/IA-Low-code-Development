@@ -81,13 +81,16 @@
             <div class="canvas-toolbar" id="canvasToolbar">
                 <button class="toolbar-btn active" id="selectToolBtn" data-tool="select" title="閫夋嫨 / 绉诲姩鑺傜偣">閫夋嫨</button>
                 <button class="toolbar-btn" id="connectToolBtn" data-tool="connect" title="杩涘叆杩炵嚎妯″紡">杩炵嚎</button>
+                <button class="toolbar-btn" id="zoomToolBtn" data-tool="zoom" title="缂╂斁鐢诲竷">缂╂斁</button>
                 <button class="toolbar-btn" id="deleteToolBtn" data-tool="delete" title="鍒犻櫎鑺傜偣锛氱偣鍑诲垹闄ゆ垨鎸変綇宸﹂敭鎷栧姩鎿﹂櫎">鍒犻櫎</button>
                 <button class="toolbar-btn toolbar-action-btn" id="arrangeCanvasBtn" title="鎸夋墽琛岄€昏緫鏁寸悊鐢诲竷">鏁寸悊鑺傜偣</button>
                 <div class="toolbar-tip" id="canvasToolHint">宸︿欢閫夋嫨妯″紡锛涘彸閿寜浣忓彲鎷栨嫿鐢诲竷</div>
             </div>
             <div class="canvas-area" id="canvasArea">
-                <div id="canvas" style="position: relative; min-height: 100%; min-width: 100%;">
-                    <svg id="connectionsSvg" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none;"></svg>
+                <div class="canvas-viewport" id="canvasViewport">
+                    <div id="canvas" style="position: relative; min-height: 100%; min-width: 100%;">
+                        <svg id="connectionsSvg" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none;"></svg>
+                    </div>
                 </div>
             </div>
         </div>

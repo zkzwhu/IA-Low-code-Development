@@ -246,10 +246,17 @@ body {
     color: #2c3e50;
     border-radius: 10px;
     padding: 8px 14px;
+    min-width: 56px;
     font-size: 13px;
     font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
     cursor: pointer;
     transition: all 0.18s ease;
+}
+
+#connectToolBtn {
+    min-width: 64px;
 }
 
 .toolbar-btn:hover {
@@ -262,48 +269,6 @@ body {
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
-}
-
-.toolbar-btn[data-tooltip]::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    bottom: -10px;
-    transform: translateX(-50%);
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-top: 6px solid rgba(28, 40, 51, 0.96);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.14s ease;
-}
-
-.toolbar-btn[data-tooltip]::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    left: 50%;
-    bottom: calc(100% + 12px);
-    transform: translateX(-50%);
-    min-width: 170px;
-    max-width: 240px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: rgba(28, 40, 51, 0.96);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 1.45;
-    text-align: left;
-    white-space: normal;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.14s ease;
-}
-
-.toolbar-btn[data-tooltip]:hover::before,
-.toolbar-btn[data-tooltip]:hover::after {
-    opacity: 1;
 }
 
 .toolbar-btn.active {
@@ -324,6 +289,16 @@ body {
     background: #ecf8f1;
     border-color: rgba(39, 174, 96, 0.22);
     color: #1e8449;
+}
+
+.toolbar-status {
+    padding: 8px 10px;
+    border-radius: 999px;
+    background: rgba(44, 125, 160, 0.10);
+    color: #245a73;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .toolbar-tip {
@@ -511,6 +486,9 @@ body {
 .canvas-area.tool-connect {
     cursor: crosshair;
 }
+.canvas-area.tool-zoom {
+    cursor: zoom-in;
+}
 .canvas-area.tool-delete {
     cursor: cell;
 }
@@ -518,12 +496,18 @@ body {
     cursor: grabbing;
     user-select: none;
 }
+.canvas-viewport {
+    position: relative;
+    min-width: 100%;
+    min-height: 100%;
+}
 #canvas {
     position: relative;
     min-height: 100%;
     min-width: 100%;
     height: 100%;
     width: 100%;
+    transform-origin: top left;
 }
 #canvas.delete-sweep-active::after {
     content: "";
@@ -710,6 +694,15 @@ body {
     pointer-events: none;
     transform: translate(-50%, -50%);
     z-index: 60;
+}
+
+.box-selection {
+    position: absolute;
+    border: 1px solid rgba(44, 125, 160, 0.85);
+    background: rgba(44, 125, 160, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.45);
+    pointer-events: none;
+    z-index: 58;
 }
 
 /* 右侧属性面板 */

@@ -1,4 +1,4 @@
-import { state, setActiveCanvasTool, setActiveConsoleTab, setDebugCurrentNodeId } from './appStore.js';
+import { state, setActiveCanvasTool, setActiveConsoleTab, setCanvasZoom, setDebugCurrentNodeId } from './appStore.js';
 import { addConsoleLog, clearConsole, displayLogs, showModal } from './appUtils.js';
 import { autoArrangeNodes, canUndoCanvasChange, captureCanvasHistorySnapshot, commitCanvasHistorySnapshot, copySelectedNodes, createNode, cutSelectedNodes, deleteSelectedNodes, pasteClipboardNodes, placeNodeWithoutOverlapById, renderCanvas, resetCanvasHistory, setSelectedNode, undoCanvasChange } from './nodeManager.js';
 import { initFileMenu } from './menuFile.js';
@@ -8,6 +8,9 @@ import { initWindowMenu } from './menuWindow.js';
 
 let debugSessionId = null;
 const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch']);
+const MIN_CANVAS_ZOOM = 0.5;
+const MAX_CANVAS_ZOOM = 2;
+const CANVAS_ZOOM_STEP = 0.1;
 const COMPONENT_LIBRARY = [
     {
         id: 'collection',
@@ -132,8 +135,16 @@ function ensureCanvasToolbarExtras() {
     const pasteBtn = ensureButton('pasteCanvasBtn', '粘贴');
     const arrangeBtn = document.getElementById('arrangeCanvasBtn');
     const hint = document.getElementById('canvasToolHint');
+    let zoomStatus = document.getElementById('canvasZoomStatus');
+    if (!zoomStatus) {
+        zoomStatus = document.createElement('span');
+        zoomStatus.id = 'canvasZoomStatus';
+        zoomStatus.className = 'toolbar-status';
+        toolbar.appendChild(zoomStatus);
+    }
 
     if (arrangeBtn) toolbar.appendChild(arrangeBtn);
+    if (zoomStatus) toolbar.appendChild(zoomStatus);
     if (hint) toolbar.appendChild(hint);
     if (!document.getElementById('canvasContextMenu')) {
         const menu = document.createElement('div');
@@ -156,6 +167,7 @@ function ensureCanvasToolbarExtras() {
 
 function updateCanvasToolbarUi() {
     const hint = document.getElementById('canvasToolHint');
+    const zoomStatus = document.getElementById('canvasZoomStatus');
     const toolMeta = {
         select: {
             label: '选择',
@@ -164,6 +176,10 @@ function updateCanvasToolbarUi() {
         connect: {
             label: '连线',
             tip: '连线模式：从节点端口拖到目标节点以建立连接。'
+        },
+        zoom: {
+            label: '缩放',
+            tip: '缩放模式：单击放大，按住 Shift 单击缩小，也可使用鼠标滚轮缩放。'
         },
         delete: {
             label: '删除',
@@ -193,6 +209,7 @@ function updateCanvasToolbarUi() {
     const toolText = {
         select: '选择模式：按住 Alt 再按左键可拖动画布。',
         connect: '连线模式：从节点端口拖到目标节点以建立连接。',
+        zoom: `缩放模式：单击放大，Shift+单击缩小，滚轮缩放。当前 ${Math.round((state.canvasZoom || 1) * 100)}%。`,
         delete: '删除模式：点击可删单个节点，按住左键拖动可擦除路径上的节点。'
     };
 
@@ -202,11 +219,12 @@ function updateCanvasToolbarUi() {
         if (!button || !meta) return;
         button.textContent = meta.label;
         button.setAttribute('title', meta.tip);
-        button.setAttribute('data-tooltip', meta.tip);
+        button.removeAttribute('data-tooltip');
     };
 
     applyMeta('selectToolBtn', 'select');
     applyMeta('connectToolBtn', 'connect');
+    applyMeta('zoomToolBtn', 'zoom');
     applyMeta('deleteToolBtn', 'delete');
     applyMeta('arrangeCanvasBtn', 'arrange');
     applyMeta('undoCanvasBtn', 'undo');
@@ -224,6 +242,7 @@ function updateCanvasToolbarUi() {
         button.classList.toggle('danger-active', isActive && tool === 'delete');
     });
 
+    if (zoomStatus) zoomStatus.textContent = `缩放 ${Math.round((state.canvasZoom || 1) * 100)}%`;
     if (hint) hint.textContent = toolText[state.activeCanvasTool] || toolText.select;
 }
 
@@ -231,6 +250,67 @@ function setCanvasTool(tool) {
     setActiveCanvasTool(tool);
     updateCanvasToolbarUi();
     renderCanvas();
+}
+
+function clampCanvasZoom(zoom) {
+    return Math.min(MAX_CANVAS_ZOOM, Math.max(MIN_CANVAS_ZOOM, Number(zoom) || 1));
+}
+
+function getCanvasZoomAnchor(clientX = null, clientY = null) {
+    const canvasArea = document.getElementById('canvasArea');
+    if (!canvasArea) return null;
+    const rect = canvasArea.getBoundingClientRect();
+    return {
+        clientX: clientX ?? (rect.left + rect.width / 2),
+        clientY: clientY ?? (rect.top + rect.height / 2),
+        rect
+    };
+}
+
+function applyCanvasZoom(nextZoom, clientX = null, clientY = null) {
+    const canvasArea = document.getElementById('canvasArea');
+    const anchor = getCanvasZoomAnchor(clientX, clientY);
+    if (!canvasArea || !anchor) return;
+
+    const previousZoom = clampCanvasZoom(state.canvasZoom || 1);
+    const targetZoom = clampCanvasZoom(nextZoom);
+    if (Math.abs(previousZoom - targetZoom) < 0.001) return;
+
+    const localClientX = anchor.clientX - anchor.rect.left;
+    const localClientY = anchor.clientY - anchor.rect.top;
+    const logicalX = (canvasArea.scrollLeft + localClientX) / previousZoom;
+    const logicalY = (canvasArea.scrollTop + localClientY) / previousZoom;
+
+    setCanvasZoom(targetZoom);
+    renderCanvas();
+
+    canvasArea.scrollLeft = Math.max(0, logicalX * targetZoom - localClientX);
+    canvasArea.scrollTop = Math.max(0, logicalY * targetZoom - localClientY);
+    updateCanvasToolbarUi();
+}
+
+function stepCanvasZoom(direction, clientX = null, clientY = null) {
+    const baseZoom = clampCanvasZoom(state.canvasZoom || 1);
+    applyCanvasZoom(baseZoom + (direction * CANVAS_ZOOM_STEP), clientX, clientY);
+}
+
+function bindCanvasZoomInteractions() {
+    const canvasArea = document.getElementById('canvasArea');
+    if (!canvasArea) return;
+
+    canvasArea.addEventListener('wheel', (e) => {
+        const canZoom = state.activeCanvasTool === 'zoom' || e.ctrlKey || e.metaKey;
+        if (!canZoom) return;
+        e.preventDefault();
+        stepCanvasZoom(e.deltaY < 0 ? 1 : -1, e.clientX, e.clientY);
+    }, { passive: false });
+
+    canvasArea.addEventListener('click', (e) => {
+        if (state.activeCanvasTool !== 'zoom') return;
+        if (e.target.closest('#canvasContextMenu')) return;
+        e.preventDefault();
+        stepCanvasZoom(e.shiftKey ? -1 : 1, e.clientX, e.clientY);
+    });
 }
 
 function bindCanvasToolbar() {
@@ -379,10 +459,13 @@ function initDragDrop() {
         if (!type || !ALLOWED_NODE_TYPES.has(type)) return;
 
         const rect = canvasArea.getBoundingClientRect();
-        let x = e.clientX - rect.left + canvasArea.scrollLeft - 90;
-        let y = e.clientY - rect.top + canvasArea.scrollTop - 40;
-        x = Math.max(20, Math.min(x, rect.width - 200));
-        y = Math.max(20, Math.min(y, rect.height - 100));
+        const zoom = clampCanvasZoom(state.canvasZoom || 1);
+        const viewportMaxX = (canvasArea.scrollLeft + rect.width) / zoom - 200;
+        const viewportMaxY = (canvasArea.scrollTop + rect.height) / zoom - 100;
+        let x = (e.clientX - rect.left + canvasArea.scrollLeft) / zoom - 90;
+        let y = (e.clientY - rect.top + canvasArea.scrollTop) / zoom - 40;
+        x = Math.max(20, Math.min(x, viewportMaxX));
+        y = Math.max(20, Math.min(y, viewportMaxY));
         const beforeSnapshot = captureCanvasHistorySnapshot();
 
         const newNode = createNode(type, x, y);
@@ -732,6 +815,7 @@ export function init() {
     ensureCanvasToolbarExtras();
     initComponentLibrary();
     initDragDrop();
+    bindCanvasZoomInteractions();
     initDemoFlow();
     initFileMenu();
     initProjectMenu();
