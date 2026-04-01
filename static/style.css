@@ -653,32 +653,42 @@ body {
 /* 连接点 */
 .connect-point {
     position: absolute;
-    right: -6px;
     top: 50%;
-    transform: translateY(-50%);
     width: 12px;
     height: 12px;
     background: var(--cp-color, #3498db);
     border-radius: 50%;
-    cursor: crosshair;
     border: 2px solid white;
     box-shadow: 0 0 0 1px #2c3e50;
     z-index: 25;
     opacity: 0.45;
     transition: transform 0.12s ease, opacity 0.12s ease, background 0.12s ease;
 }
-.connect-point[style*="left:"] {
+.connect-point.is-output {
+    right: -6px;
+    transform: translateY(-50%);
+    cursor: crosshair;
+}
+.connect-point.is-input {
+    left: -6px;
+    transform: translateY(-50%);
+    background: #7fc8a9;
+    box-shadow: 0 0 0 1px #3f6b58;
+    opacity: 0.88;
+    cursor: default;
+}
+.connect-point.custom-position {
     transform: none;
 }
 .flow-node.connect-mode .connect-point,
 .flow-node.selected .connect-point {
     opacity: 1;
 }
-.connect-point:hover {
+.connect-point.is-output:hover {
     background: var(--cp-hover-color, #e67e22);
     transform: translateY(-50%) scale(1.2);
 }
-.connect-point[style*="left:"]:hover {
+.connect-point.custom-position:hover {
     transform: scale(1.2);
 }
 
@@ -1008,5 +1018,7 @@ body {
     stroke: #3498db;
     stroke-width: 2;
     fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
     marker-end: url(#arrowhead);
 }

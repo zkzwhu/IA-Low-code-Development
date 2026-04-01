@@ -9,6 +9,11 @@ const ROOT_GAP_X = 56;
 const ROOT_GAP_Y = 56;
 const CHILD_STACK_GAP = 18;
 const CANVAS_PADDING = 48;
+const CONNECTION_STUB = 42;
+const CONNECTION_ROUTE_MARGIN = 34;
+const CONNECTION_ROUTE_OUTER_MARGIN = 72;
+const CONNECTION_TURN_RADIUS = 18;
+const CONNECTION_TURN_PENALTY = 42;
 const DELETE_SWEEP_RADIUS = 26;
 const PASTE_OFFSET_STEP = 28;
 const MAX_UNDO_HISTORY = 80;
@@ -1163,8 +1168,321 @@ function scheduleConnectionRefresh() {
 }
 
 // 绘制连线
+function toCanvasPoint(rect, containerRect, zoom) {
+    return {
+        left: (rect.left - containerRect.left) / zoom,
+        right: (rect.right - containerRect.left) / zoom,
+        top: (rect.top - containerRect.top) / zoom,
+        bottom: (rect.bottom - containerRect.top) / zoom,
+        width: rect.width / zoom,
+        height: rect.height / zoom
+    };
+}
+
+function normalizeRouteCoord(value) {
+    return Math.round(value * 10) / 10;
+}
+
+function isPointInsideRect(point, rect) {
+    return point.x > rect.left && point.x < rect.right && point.y > rect.top && point.y < rect.bottom;
+}
+
+function isPointBlocked(point, obstacles) {
+    return obstacles.some(rect => isPointInsideRect(point, rect));
+}
+
+function isAxisAlignedSegmentClear(a, b, obstacles) {
+    const sameX = Math.abs(a.x - b.x) < 0.1;
+    const sameY = Math.abs(a.y - b.y) < 0.1;
+    if (!sameX && !sameY) return false;
+
+    const minX = Math.min(a.x, b.x);
+    const maxX = Math.max(a.x, b.x);
+    const minY = Math.min(a.y, b.y);
+    const maxY = Math.max(a.y, b.y);
+
+    return !obstacles.some(rect => {
+        if (sameX) {
+            return a.x > rect.left && a.x < rect.right && maxY > rect.top && minY < rect.bottom;
+        }
+        return a.y > rect.top && a.y < rect.bottom && maxX > rect.left && minX < rect.right;
+    });
+}
+
+function compressOrthogonalPoints(points) {
+    const compact = [];
+    for (let point of points) {
+        if (!point) continue;
+        const normalized = {
+            x: normalizeRouteCoord(point.x),
+            y: normalizeRouteCoord(point.y)
+        };
+        const last = compact[compact.length - 1];
+        if (last && Math.abs(last.x - normalized.x) < 0.1 && Math.abs(last.y - normalized.y) < 0.1) continue;
+        compact.push(normalized);
+    }
+
+    if (compact.length <= 2) return compact;
+
+    const simplified = [compact[0]];
+    for (let i = 1; i < compact.length - 1; i++) {
+        const prev = simplified[simplified.length - 1];
+        const current = compact[i];
+        const next = compact[i + 1];
+        const isCollinear =
+            (Math.abs(prev.x - current.x) < 0.1 && Math.abs(current.x - next.x) < 0.1) ||
+            (Math.abs(prev.y - current.y) < 0.1 && Math.abs(current.y - next.y) < 0.1);
+        if (!isCollinear) simplified.push(current);
+    }
+    simplified.push(compact[compact.length - 1]);
+    return simplified;
+}
+
+function pointTowards(from, to, distance) {
+    if (Math.abs(from.x - to.x) > 0.1) {
+        const dir = to.x > from.x ? 1 : -1;
+        return { x: from.x + dir * distance, y: from.y };
+    }
+    const dir = to.y > from.y ? 1 : -1;
+    return { x: from.x, y: from.y + dir * distance };
+}
+
+function buildRoundedPath(points) {
+    const route = compressOrthogonalPoints(points);
+    if (!route.length) return '';
+    if (route.length === 1) return `M ${route[0].x} ${route[0].y}`;
+
+    let d = `M ${route[0].x} ${route[0].y}`;
+    for (let i = 1; i < route.length - 1; i++) {
+        const prev = route[i - 1];
+        const current = route[i];
+        const next = route[i + 1];
+        const prevDist = Math.hypot(current.x - prev.x, current.y - prev.y);
+        const nextDist = Math.hypot(next.x - current.x, next.y - current.y);
+        const radius = Math.min(CONNECTION_TURN_RADIUS, prevDist / 2, nextDist / 2);
+
+        if (radius < 0.1) {
+            d += ` L ${current.x} ${current.y}`;
+            continue;
+        }
+
+        const entry = pointTowards(current, prev, radius);
+        const exit = pointTowards(current, next, radius);
+        d += ` L ${entry.x} ${entry.y}`;
+        d += ` Q ${current.x} ${current.y} ${exit.x} ${exit.y}`;
+    }
+
+    const last = route[route.length - 1];
+    d += ` L ${last.x} ${last.y}`;
+    return d;
+}
+
+function buildFallbackCurvePath(start, end) {
+    const deltaX = end.x - start.x;
+    const control = Math.max(Math.abs(deltaX) * 0.45, 56);
+    return `M ${start.x} ${start.y} C ${start.x + control} ${start.y}, ${end.x - control} ${end.y}, ${end.x} ${end.y}`;
+}
+
+function createRouteNodeGraph(points, obstacles) {
+    const nodes = [];
+    const pointIndex = new Map();
+    const columns = new Map();
+    const rows = new Map();
+
+    const addNode = (point, kind = 'grid') => {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+        const normalized = {
+            x: normalizeRouteCoord(point.x),
+            y: normalizeRouteCoord(point.y)
+        };
+        const key = `${normalized.x}|${normalized.y}`;
+        if (pointIndex.has(key)) return pointIndex.get(key);
+        if (kind === 'grid' && isPointBlocked(normalized, obstacles)) return null;
+
+        const node = { ...normalized, key };
+        nodes.push(node);
+        pointIndex.set(key, node);
+
+        if (!columns.has(node.x)) columns.set(node.x, []);
+        if (!rows.has(node.y)) rows.set(node.y, []);
+        columns.get(node.x).push(node);
+        rows.get(node.y).push(node);
+        return node;
+    };
+
+    points.forEach(point => addNode(point));
+
+    const adjacency = new Map(nodes.map(node => [node.key, []]));
+    const connectSeries = (series, axis) => {
+        series.sort((a, b) => axis === 'x' ? a.y - b.y : a.x - b.x);
+        for (let i = 0; i < series.length - 1; i++) {
+            const a = series[i];
+            const b = series[i + 1];
+            if (!isAxisAlignedSegmentClear(a, b, obstacles)) continue;
+            const distance = Math.abs(axis === 'x' ? b.y - a.y : b.x - a.x);
+            adjacency.get(a.key).push({ key: b.key, direction: axis === 'x' ? 'V' : 'H', distance });
+            adjacency.get(b.key).push({ key: a.key, direction: axis === 'x' ? 'V' : 'H', distance });
+        }
+    };
+
+    columns.forEach(series => connectSeries(series, 'x'));
+    rows.forEach(series => connectSeries(series, 'y'));
+
+    return { adjacency, pointIndex };
+}
+
+function findOrthogonalRoute(start, end, obstacles, bounds = null) {
+    const candidateXs = new Set([
+        normalizeRouteCoord(start.x),
+        normalizeRouteCoord(end.x)
+    ]);
+    const candidateYs = new Set([
+        normalizeRouteCoord(start.y),
+        normalizeRouteCoord(end.y)
+    ]);
+
+    for (let rect of obstacles) {
+        candidateXs.add(normalizeRouteCoord(rect.left));
+        candidateXs.add(normalizeRouteCoord(rect.right));
+        candidateYs.add(normalizeRouteCoord(rect.top));
+        candidateYs.add(normalizeRouteCoord(rect.bottom));
+    }
+
+    if (bounds) {
+        candidateXs.add(normalizeRouteCoord(bounds.left));
+        candidateXs.add(normalizeRouteCoord(bounds.right));
+        candidateYs.add(normalizeRouteCoord(bounds.top));
+        candidateYs.add(normalizeRouteCoord(bounds.bottom));
+    }
+
+    const gridPoints = [];
+    for (let x of candidateXs) {
+        for (let y of candidateYs) {
+            gridPoints.push({ x, y });
+        }
+    }
+    gridPoints.push(start, end);
+
+    const { adjacency, pointIndex } = createRouteNodeGraph(gridPoints, obstacles);
+    const startNode = pointIndex.get(`${normalizeRouteCoord(start.x)}|${normalizeRouteCoord(start.y)}`);
+    const endNode = pointIndex.get(`${normalizeRouteCoord(end.x)}|${normalizeRouteCoord(end.y)}`);
+    if (!startNode || !endNode) return null;
+
+    const queue = [{ key: startNode.key, direction: 'S', cost: 0, priority: 0 }];
+    const costs = new Map([[`${startNode.key}|S`, 0]]);
+    const previous = new Map();
+
+    while (queue.length) {
+        queue.sort((a, b) => a.priority - b.priority);
+        const current = queue.shift();
+        const currentStateKey = `${current.key}|${current.direction}`;
+        if (current.cost !== costs.get(currentStateKey)) continue;
+
+        if (current.key === endNode.key) {
+            const path = [];
+            let cursorKey = currentStateKey;
+            while (cursorKey) {
+                const [nodeKey] = cursorKey.split('|');
+                const point = pointIndex.get(nodeKey);
+                if (point) path.push({ x: point.x, y: point.y });
+                cursorKey = previous.get(cursorKey) || null;
+            }
+            return path.reverse();
+        }
+
+        const neighbors = adjacency.get(current.key) || [];
+        for (let edge of neighbors) {
+            const turnPenalty = current.direction !== 'S' && current.direction !== edge.direction ? CONNECTION_TURN_PENALTY : 0;
+            const nextCost = current.cost + edge.distance + turnPenalty;
+            const nextStateKey = `${edge.key}|${edge.direction}`;
+            if (nextCost >= (costs.get(nextStateKey) ?? Infinity)) continue;
+
+            const point = pointIndex.get(edge.key);
+            const heuristic = point ? Math.abs(point.x - endNode.x) + Math.abs(point.y - endNode.y) : 0;
+            costs.set(nextStateKey, nextCost);
+            previous.set(nextStateKey, currentStateKey);
+            queue.push({
+                key: edge.key,
+                direction: edge.direction,
+                cost: nextCost,
+                priority: nextCost + heuristic
+            });
+        }
+    }
+
+    return null;
+}
+
+function buildRouteBounds(start, end, obstacles = []) {
+    let minX = Math.min(start.x, end.x);
+    let maxX = Math.max(start.x, end.x);
+    let minY = Math.min(start.y, end.y);
+    let maxY = Math.max(start.y, end.y);
+
+    for (let rect of obstacles) {
+        minX = Math.min(minX, rect.left);
+        maxX = Math.max(maxX, rect.right);
+        minY = Math.min(minY, rect.top);
+        maxY = Math.max(maxY, rect.bottom);
+    }
+
+    return {
+        left: normalizeRouteCoord(minX - CONNECTION_ROUTE_OUTER_MARGIN),
+        right: normalizeRouteCoord(maxX + CONNECTION_ROUTE_OUTER_MARGIN),
+        top: normalizeRouteCoord(minY - CONNECTION_ROUTE_OUTER_MARGIN),
+        bottom: normalizeRouteCoord(maxY + CONNECTION_ROUTE_OUTER_MARGIN)
+    };
+}
+
+function buildConnectionPath(start, end, obstacles = []) {
+    const startStub = { x: start.x + CONNECTION_STUB, y: start.y };
+    const endStub = { x: end.x - CONNECTION_STUB, y: end.y };
+    const bounds = buildRouteBounds(startStub, endStub, obstacles);
+    const route = findOrthogonalRoute(startStub, endStub, obstacles, bounds);
+    if (!route || !route.length) return buildFallbackCurvePath(start, end);
+    return buildRoundedPath([start, ...route, end]);
+}
+
+function getPortAnchor(portEl, containerRect, zoom) {
+    if (!portEl) return null;
+    const rect = portEl.getBoundingClientRect();
+    return {
+        x: (rect.left + rect.width / 2 - containerRect.left) / zoom,
+        y: (rect.top + rect.height / 2 - containerRect.top) / zoom
+    };
+}
+
+function collectRenderedNodeRects(canvasDiv, containerRect, zoom) {
+    const nodeRects = new Map();
+    canvasDiv.querySelectorAll('.flow-node').forEach(nodeEl => {
+        const nodeId = Number(nodeEl.getAttribute('data-id'));
+        if (!Number.isFinite(nodeId)) return;
+        nodeRects.set(nodeId, toCanvasPoint(nodeEl.getBoundingClientRect(), containerRect, zoom));
+    });
+    return nodeRects;
+}
+
+function buildConnectionObstacles(nodeRects, excludedIds = []) {
+    const excluded = new Set(excludedIds);
+    const obstacles = [];
+
+    nodeRects.forEach((rect, nodeId) => {
+        if (excluded.has(nodeId)) return;
+        obstacles.push({
+            left: rect.left - CONNECTION_ROUTE_MARGIN,
+            right: rect.right + CONNECTION_ROUTE_MARGIN,
+            top: rect.top - CONNECTION_ROUTE_MARGIN,
+            bottom: rect.bottom + CONNECTION_ROUTE_MARGIN
+        });
+    });
+
+    return obstacles;
+}
+
 function drawConnections() {
     const svg = document.getElementById("connectionsSvg");
+    const canvasDiv = document.getElementById("canvas");
+    if (!svg || !canvasDiv) return;
     svg.innerHTML = '';
     // 添加箭头标记
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
@@ -1177,13 +1495,13 @@ function drawConnections() {
     marker.setAttribute("orient", "auto");
     const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
     polygon.setAttribute("points", "0 0, 10 5, 0 10");
-    polygon.setAttribute("fill", "#3498db");
+    polygon.setAttribute("fill", "context-stroke");
     marker.appendChild(polygon);
     defs.appendChild(marker);
     svg.appendChild(defs);
-    const canvasDiv = document.getElementById("canvas");
     const containerRect = canvasDiv.getBoundingClientRect();
     const zoom = getCanvasZoom();
+    const nodeRects = collectRenderedNodeRects(canvasDiv, containerRect, zoom);
 
     // 不同连线含义使用不同颜色，便于“可视化编辑”。
     const fieldColor = {
@@ -1198,42 +1516,25 @@ function drawConnections() {
 
         const outgoing = [];
         if (props.nextNodeId) outgoing.push({ field: 'nextNodeId', toId: props.nextNodeId });
-        if (node.type === 'loop') {
-            const bodyIds = Array.isArray(props.bodyNodeIds) ? props.bodyNodeIds : [];
-            for (let id of bodyIds) {
-                if (id) outgoing.push({ field: 'loopBody', toId: id });
-            }
-        }
-        if (node.type === 'branch') {
-            const t = Array.isArray(props.trueBodyNodeIds) ? props.trueBodyNodeIds : [];
-            const f = Array.isArray(props.falseBodyNodeIds) ? props.falseBodyNodeIds : [];
-            for (let id of t) if (id) outgoing.push({ field: 'trueBody', toId: id });
-            for (let id of f) if (id) outgoing.push({ field: 'falseBody', toId: id });
-        }
-
         for (let conn of outgoing) {
             const sourcePoint = canvasDiv.querySelector(
-                `.flow-node[data-id="${node.id}"] .connect-point[data-field="${conn.field}"]`
+                `.flow-node[data-id="${node.id}"] .connect-point.is-output[data-field="${conn.field}"]`
             );
-            const targetElem = canvasDiv.querySelector(`.flow-node[data-id="${conn.toId}"]`);
-            if (!sourcePoint || !targetElem) continue;
+            const targetPoint = canvasDiv.querySelector(
+                `.flow-node[data-id="${conn.toId}"] .connect-point.is-input`
+            );
+            if (!sourcePoint || !targetPoint) continue;
 
-            const sourcePointRect = sourcePoint.getBoundingClientRect();
-            const startX = (sourcePointRect.right - containerRect.left) / zoom;
-            const startY = (sourcePointRect.top + sourcePointRect.height / 2 - containerRect.top) / zoom;
+            const start = getPortAnchor(sourcePoint, containerRect, zoom);
+            const end = getPortAnchor(targetPoint, containerRect, zoom);
+            if (!start || !end) continue;
 
-            const targetRect = targetElem.getBoundingClientRect();
-            const endX = (targetRect.left - containerRect.left + 10) / zoom;
-            const endY = (targetRect.top + targetRect.height / 2 - containerRect.top) / zoom;
-
-            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-            line.setAttribute("x1", startX);
-            line.setAttribute("y1", startY);
-            line.setAttribute("x2", endX);
-            line.setAttribute("y2", endY);
-            line.classList.add("connection-line");
-            line.setAttribute("stroke", fieldColor[conn.field] || "#3498db");
-            svg.appendChild(line);
+            const obstacles = buildConnectionObstacles(nodeRects, [node.id, conn.toId]);
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", buildConnectionPath(start, end, obstacles));
+            path.classList.add("connection-line");
+            path.setAttribute("stroke", fieldColor[conn.field] || "#3498db");
+            svg.appendChild(path);
         }
     }
 }
@@ -1302,15 +1603,24 @@ export function renderCanvas() {
         nodeDiv.title = nodeName;
 
         const portPos = node.properties?.portPositions || {};
-        const portStyle = (field, fallbackTopPct) => {
+        const hasCustomPortPosition = (field) => {
+            const p = portPos[field];
+            return !!(p && typeof p.x === 'number' && typeof p.y === 'number');
+        };
+        const outputPortStyle = (field, fallbackTopPct) => {
             const p = portPos[field];
             if (p && typeof p.x === 'number' && typeof p.y === 'number') {
                 return `left: calc(${p.x}% - 6px); top: calc(${p.y}% - 6px); right: auto;`;
             }
             return `top:${fallbackTopPct}%;`;
         };
+        const portStyle = outputPortStyle;
 
         const bpOn = !!node.properties?.breakpoint;
+        const inputPointHtml = `<div class="connect-point is-input" data-id="${node.id}" data-field="input" title="输入端口"></div>`;
+        const outputPort = (field, fallbackTopPct, color, hoverColor, title) => `
+            <div class="connect-point is-output${hasCustomPortPosition(field) ? ' custom-position' : ''}" data-id="${node.id}" data-field="${field}" style="${outputPortStyle(field, fallbackTopPct)} --cp-color:${color}; --cp-hover-color:${hoverColor};" title="${title}"></div>
+        `;
         const bpDotHtml = `<span class="breakpoint-dot ${bpOn ? 'on' : ''}" data-action="toggleBreakpoint" title="断点（点击切换）"></span>`;
 
         // 端口
@@ -1360,6 +1670,17 @@ export function renderCanvas() {
                 ${connectPointsHtml}
             </div>
         `;
+
+        const nodeBodyEl = nodeDiv.querySelector('.node-body');
+        if (nodeBodyEl) {
+            nodeBodyEl.insertAdjacentHTML('afterbegin', inputPointHtml);
+        }
+        nodeDiv.querySelectorAll('.connect-point').forEach(point => {
+            if (point.classList.contains('is-input')) return;
+            point.classList.add('is-output');
+            const field = point.getAttribute('data-field');
+            if (field && hasCustomPortPosition(field)) point.classList.add('custom-position');
+        });
 
         if (node.type === 'loop') {
             const { width: w, height: h } = getNodeBox(node, childrenByParent);
@@ -1487,7 +1808,7 @@ export function renderCanvas() {
         svg.setAttribute('height', `${logicalHeight}`);
     }
 
-    document.querySelectorAll('.connect-point').forEach(point => {
+    document.querySelectorAll('.connect-point.is-output').forEach(point => {
         point.removeEventListener('mousedown', onConnectPointMouseDown);
         point.addEventListener('mousedown', onConnectPointMouseDown);
     });
@@ -2204,12 +2525,12 @@ function onGlobalMouseMove(e) {
             let startX = 0;
             let startY = 0;
             const sourcePoint = draggingFromField
-                ? canvasDiv.querySelector(`.flow-node[data-id="${draggingFromNodeId}"] .connect-point[data-field="${draggingFromField}"]`)
+                ? canvasDiv.querySelector(`.flow-node[data-id="${draggingFromNodeId}"] .connect-point.is-output[data-field="${draggingFromField}"]`)
                 : null;
             if (sourcePoint) {
-                const sourcePointRect = sourcePoint.getBoundingClientRect();
-                startX = (sourcePointRect.right - containerRect.left) / zoom;
-                startY = (sourcePointRect.top + sourcePointRect.height / 2 - containerRect.top) / zoom;
+                const sourceAnchor = getPortAnchor(sourcePoint, containerRect, zoom);
+                startX = sourceAnchor?.x ?? 0;
+                startY = sourceAnchor?.y ?? 0;
             } else {
                 const sourceElem = canvasDiv.querySelector(`.flow-node[data-id="${draggingFromNodeId}"]`);
                 if (sourceElem) {
@@ -2222,17 +2543,14 @@ function onGlobalMouseMove(e) {
                 const endY = (e.clientY - containerRect.top) / zoom;
                 if (!tempLine) {
                     const svg = document.getElementById("connectionsSvg");
-                    tempLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    tempLine = document.createElementNS("http://www.w3.org/2000/svg", "path");
                     tempLine.setAttribute("stroke", "#e67e22");
                     tempLine.setAttribute("stroke-width", "2");
                     tempLine.setAttribute("stroke-dasharray", "5,5");
                     tempLine.setAttribute("fill", "none");
                     svg.appendChild(tempLine);
                 }
-                tempLine.setAttribute("x1", startX);
-                tempLine.setAttribute("y1", startY);
-                tempLine.setAttribute("x2", endX);
-                tempLine.setAttribute("y2", endY);
+                tempLine.setAttribute("d", buildFallbackCurvePath({ x: startX, y: startY }, { x: endX, y: endY }));
         }
     }
 }
