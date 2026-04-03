@@ -11,6 +11,7 @@ const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branc
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
+const EDITOR_IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const COMPONENT_LIBRARY = [
     {
         id: 'collection',
@@ -658,6 +659,84 @@ async function debugStop() {
     renderDebugState(null);
     setConsoleTab('debug');
     addConsoleLog('调试已手动停止。', 'info', 'debug');
+}
+
+function getEditorQuery() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        mode: params.get('mode') === 'screen' ? 'screen' : 'workflow',
+        entry: params.get('entry') || ''
+    };
+}
+
+function applyProjectData(data) {
+    state.nodes.clear();
+
+    for (const node of data.nodes || []) {
+        state.nodes.set(node.id, node);
+    }
+
+    state.nextId = Number.isFinite(Number(data.next_id)) ? Number(data.next_id) : 100;
+    setDebugCurrentNodeId(null);
+    resetCanvasHistory();
+    renderCanvas();
+    setSelectedNode(null);
+}
+
+function loadImportedProject() {
+    const rawPayload = sessionStorage.getItem(EDITOR_IMPORT_STORAGE_KEY);
+    if (!rawPayload) return false;
+
+    sessionStorage.removeItem(EDITOR_IMPORT_STORAGE_KEY);
+
+    try {
+        const payload = JSON.parse(rawPayload);
+        const importedData = payload?.data || {};
+
+        if (!Array.isArray(importedData.nodes)) {
+            throw new Error('Invalid imported project');
+        }
+
+        applyProjectData(importedData);
+        addConsoleLog(`已导入 ${payload?.filename || 'JSON 文件'}，可以继续编辑。`, 'info', 'run');
+        return true;
+    } catch (error) {
+        addConsoleLog('导入数据无效，已切换到默认画布。', 'error', 'run');
+        return false;
+    }
+}
+
+function initBlankProject(mode) {
+    applyProjectData({ nodes: [], next_id: 100 });
+    addConsoleLog(
+        mode === 'screen'
+            ? '已创建空白大屏应用项目，当前先复用工作流编辑器进行搭建。'
+            : '已创建空白工作流项目，可以开始拖拽节点。',
+        'info',
+        'run'
+    );
+}
+
+function initializeProjectData() {
+    const { mode, entry } = getEditorQuery();
+
+    if (loadImportedProject()) {
+        if (mode === 'screen') {
+            addConsoleLog('当前通过大屏应用入口进入，暂复用现有工作流编辑界面。', 'info', 'run');
+        }
+        return;
+    }
+
+    if (entry === 'create') {
+        initBlankProject(mode);
+        return;
+    }
+
+    initDemoFlow();
+
+    if (mode === 'screen') {
+        addConsoleLog('当前通过大屏应用入口进入，暂复用现有工作流编辑界面。', 'info', 'run');
+    }
 }
 
 function initDemoFlow() {

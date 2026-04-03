@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大屏应用编辑器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='screenEditor.css') }}">
+</head>
+<body>
+<div class="screen-shell">
+    <header class="screen-topbar">
+        <div class="topbar-left">
+            <a class="menu-back-btn" href="{{ url_for('home') }}">返回主菜单</a>
+            <div>
+                <p class="topbar-eyebrow">Screen Builder</p>
+                <h1>低代码大屏编辑器</h1>
+            </div>
+        </div>
+        <div class="topbar-actions">
+            <button type="button" class="topbar-btn" id="importScreenBtn">导入 JSON</button>
+            <button type="button" class="topbar-btn" id="exportScreenBtn">导出 JSON</button>
+            <button type="button" class="topbar-btn primary" id="runScreenBtn">运行生成网页</button>
+        </div>
+    </header>
+
+    <main class="editor-layout">
+        <aside class="components-panel">
+            <div class="panel-header">组件库</div>
+            <div class="panel-subtitle">先支持文本显示和图片展示两个基础组件。</div>
+            <div class="components-list" id="screenComponentLibrary"></div>
+        </aside>
+
+        <section class="canvas-panel">
+            <div class="canvas-toolbar">
+                <span class="toolbar-pill">拖拽组件到画布</span>
+                <span class="toolbar-pill subtle">选中后可拖动位置并在右侧修改属性</span>
+            </div>
+            <div class="canvas-area" id="screenCanvasArea">
+                <div class="screen-stage" id="screenStage"></div>
+            </div>
+        </section>
+
+        <aside class="properties-panel">
+            <div class="panel-header">属性面板</div>
+            <div class="prop-content" id="screenPropContent"></div>
+        </aside>
+    </main>
+</div>
+
+<input id="screenImportInput" type="file" accept=".json,application/json" hidden>
+
+<script type="module" src="{{ url_for('static', filename='screenEditor.js') }}"></script>
+</body>
+</html>

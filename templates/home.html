@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>低代码开发平台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
+</head>
+<body>
+<main class="landing-shell">
+    <section class="landing-card action-panel">
+        <div class="panel-badge">Low-Code Studio</div>
+        <h1>低代码开发平台</h1>
+        <p class="panel-lead">
+            从这里进入工作流设计与大屏应用搭建，先选择项目入口，再进入现有编辑器继续开发。
+        </p>
+
+        <div class="action-list">
+            <article class="action-item">
+                <div>
+                    <h2>创建工作流</h2>
+                    <p>直接进入当前工作流创建界面，开始拖拽节点和配置流程。</p>
+                </div>
+                <button class="action-btn primary" data-action="create" data-project="workflow">立即创建</button>
+            </article>
+
+            <article class="action-item">
+                <div>
+                    <h2>导入工作流</h2>
+                    <p>选择本地 JSON 文件，导入后自动进入当前工作流编辑界面。</p>
+                </div>
+                <button class="action-btn" data-action="import" data-project="workflow">导入 JSON</button>
+            </article>
+
+            <article class="action-item">
+                <div>
+                    <h2>创建大屏应用</h2>
+                    <p>进入独立的大屏应用编辑器，低代码搭建页面前端。</p>
+                </div>
+                <button class="action-btn primary alt" data-action="create" data-project="screen">立即创建</button>
+            </article>
+
+            <article class="action-item">
+                <div>
+                    <h2>导入大屏应用</h2>
+                    <p>选择本地 JSON 文件并带入编辑器，便于继续完善大屏应用配置。</p>
+                </div>
+                <button class="action-btn" data-action="import" data-project="screen">导入 JSON</button>
+            </article>
+        </div>
+    </section>
+
+    <aside class="landing-card intro-panel">
+        <p class="intro-tag">项目介绍</p>
+        <h2>面向低代码开发的一体化实验平台</h2>
+        <p>
+            当前项目已经完成了工作流开发的后端能力，并具备可视化节点编排、执行和调试基础。
+            新增的主界面负责承接项目入口，让工作流与大屏应用都可以从统一门户进入。
+        </p>
+
+        <div class="intro-grid">
+            <div class="intro-block">
+                <span>工作流开发</span>
+                <strong>节点拖拽、流程执行、单步调试</strong>
+            </div>
+            <div class="intro-block">
+                <span>大屏应用扩展</span>
+                <strong>独立大屏编辑器，支持组件拖拽、属性编辑和网页生成</strong>
+            </div>
+            <div class="intro-block">
+                <span>JSON 导入</span>
+                <strong>支持从主界面选择文件并带入编辑器继续编辑</strong>
+            </div>
+            <div class="intro-block">
+                <span>统一入口</span>
+                <strong>应用启动后先进入主页，再按项目类型进入编辑阶段</strong>
+            </div>
+        </div>
+    </aside>
+</main>
+
+<script>
+    window.editorEntries = {
+        workflow: "{{ url_for('workflow_editor') }}",
+        screen: "{{ url_for('screen_editor') }}"
+    };
+</script>
+<script type="module" src="{{ url_for('static', filename='home.js') }}"></script>
+</body>
+</html>

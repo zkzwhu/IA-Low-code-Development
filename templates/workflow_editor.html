@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作流编辑器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-container">
+    <div class="menu-bar">
+        <a class="menu-back-btn" href="{{ url_for('home') }}">返回主菜单</a>
+        <div class="title">低代码工作流编辑器</div>
+
+        <div class="menu-item has-submenu">
+            文件
+            <div class="submenu">
+                <div class="submenu-item" id="newProjectBtn">新建项目</div>
+                <div class="submenu-item" id="saveProjectBtn">保存项目</div>
+                <div class="submenu-item" id="loadProjectBtn">加载项目</div>
+            </div>
+        </div>
+
+        <div class="menu-item has-submenu">
+            编辑
+            <div class="submenu">
+                <div class="submenu-item" id="deleteSelectedBtn">删除选中节点</div>
+                <div class="submenu-item" id="clearCanvasBtn">清空画布</div>
+            </div>
+        </div>
+
+        <div class="menu-item has-submenu">
+            项目
+            <div class="submenu">
+                <div class="submenu-item" id="exportProjectBtn">导出 JSON</div>
+                <div class="submenu-item" id="importProjectBtn">导入 JSON</div>
+            </div>
+        </div>
+
+        <div class="menu-item has-submenu">
+            设置
+            <div class="submenu">
+                <div class="submenu-item" id="consoleSettingBtn">控制台输出模式</div>
+                <div class="submenu-item" id="tipsSettingBtn">使用提示</div>
+            </div>
+        </div>
+
+        <div class="menu-item has-submenu">
+            窗口
+            <div class="submenu">
+                <div class="submenu-item" id="resetViewBtn">重置视图</div>
+                <div class="submenu-item" id="helpBtn">帮助</div>
+                <div class="submenu-item" id="aboutBtn">关于</div>
+            </div>
+        </div>
+
+        <div class="top-right"></div>
+    </div>
+
+    <div class="main-layout">
+        <div class="components-panel">
+            <div class="panel-header">组件库</div>
+            <div class="components-hint">从左侧拖拽节点到画布，完成工作流编排。</div>
+            <div class="components-list" id="componentsLibrary"></div>
+        </div>
+
+        <div class="canvas-panel">
+            <div class="canvas-toolbar" id="canvasToolbar">
+                <button class="toolbar-btn active" id="selectToolBtn" data-tool="select" title="选择">选择</button>
+                <button class="toolbar-btn" id="connectToolBtn" data-tool="connect" title="连接">连接</button>
+                <button class="toolbar-btn" id="zoomToolBtn" data-tool="zoom" title="缩放">缩放</button>
+                <button class="toolbar-btn" id="deleteToolBtn" data-tool="delete" title="删除">删除</button>
+                <button class="toolbar-btn toolbar-action-btn" id="arrangeCanvasBtn" title="整理画布">整理画布</button>
+                <div class="toolbar-tip" id="canvasToolHint">选择一个工具后在画布中操作节点。</div>
+            </div>
+            <div class="canvas-area" id="canvasArea">
+                <div class="canvas-viewport" id="canvasViewport">
+                    <div id="canvas" style="position: relative; min-height: 100%; min-width: 100%;">
+                        <svg id="connectionsSvg" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none;"></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="properties-panel" id="propsPanel">
+            <div class="prop-header">属性配置</div>
+            <div class="prop-content" id="propContent">
+                <div class="help-text">点击画布中的节点查看并修改属性。</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="console-panel"></div>
+</div>
+
+<div class="modal-mask" id="modalMask" style="display:none;">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modalTitle">提示</div>
+            <button class="modal-close" id="modalCloseBtn" title="关闭">×</button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-footer" id="modalFooter">
+            <button class="modal-btn" id="modalCancelBtn" title="取消">取消</button>
+            <button class="modal-btn primary" id="modalOkBtn" title="确定">确定</button>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="{{ url_for('static', filename='appMain.js') }}"></script>
+</body>
+</html>

@@ -203,8 +203,16 @@ def debug_stop():
     return jsonify({"status": "ok"})
 
 @app.route('/')
-def index():
-    return render_template('index.html')
+def home():
+    return render_template('home.html')
+
+@app.route('/workflow-editor')
+def workflow_editor():
+    return render_template('workflow_editor.html')
+
+@app.route('/screen-editor')
+def screen_editor():
+    return render_template('screen_editor.html')
 
 @app.route('/api/workflow/save', methods=['POST'])
 def save_workflow():

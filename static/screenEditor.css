@@ -1,0 +1,404 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #182432;
+    background:
+        radial-gradient(circle at top left, rgba(88, 164, 176, 0.22), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(236, 184, 101, 0.22), transparent 34%),
+        linear-gradient(145deg, #f2f6f8 0%, #edf2f7 48%, #f8fbfd 100%);
+}
+
+.screen-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    gap: 18px;
+}
+
+.screen-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 22px;
+    border-radius: 24px;
+    background: rgba(18, 28, 39, 0.92);
+    color: #ffffff;
+    box-shadow: 0 18px 50px rgba(25, 38, 52, 0.22);
+}
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.menu-back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.menu-back-btn:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.topbar-eyebrow {
+    margin: 0 0 4px;
+    color: #9ecde4;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.screen-topbar h1 {
+    margin: 0;
+    font-size: 30px;
+    line-height: 1.1;
+}
+
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.topbar-btn {
+    border: none;
+    padding: 11px 18px;
+    border-radius: 999px;
+    background: #dceef4;
+    color: #245a73;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.topbar-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(36, 90, 115, 0.18);
+}
+
+.topbar-btn.primary {
+    color: #ffffff;
+    background: linear-gradient(135deg, #245a73 0%, #2c7da0 100%);
+}
+
+.editor-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr) 320px;
+    gap: 18px;
+}
+
+.components-panel,
+.properties-panel,
+.canvas-panel {
+    min-height: 0;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(24, 36, 50, 0.08);
+    box-shadow: 0 18px 50px rgba(35, 51, 66, 0.10);
+}
+
+.components-panel,
+.properties-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-header {
+    padding: 18px 20px 10px;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.panel-subtitle {
+    padding: 0 20px 16px;
+    color: #627586;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.components-list {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.component-card {
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(36, 90, 115, 0.12);
+    background: linear-gradient(135deg, rgba(249, 251, 252, 0.96), rgba(238, 245, 248, 0.98));
+    cursor: grab;
+}
+
+.component-card:active {
+    cursor: grabbing;
+}
+
+.component-card strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 16px;
+}
+
+.component-card p {
+    margin: 0;
+    color: #607283;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.canvas-panel {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    gap: 14px;
+}
+
+.canvas-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.toolbar-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(36, 90, 115, 0.10);
+    color: #245a73;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.toolbar-pill.subtle {
+    background: rgba(24, 36, 50, 0.06);
+    color: #607283;
+}
+
+.canvas-area {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border-radius: 20px;
+    background:
+        linear-gradient(90deg, rgba(101, 126, 152, 0.08) 1px, transparent 1px),
+        linear-gradient(rgba(101, 126, 152, 0.08) 1px, transparent 1px),
+        linear-gradient(145deg, #f8fbfd 0%, #edf3f7 100%);
+    background-size: 24px 24px, 24px 24px, auto;
+    padding: 28px;
+}
+
+.canvas-area.panning {
+    cursor: grabbing;
+    user-select: none;
+}
+
+.screen-stage {
+    position: relative;
+    width: 1440px;
+    height: 900px;
+    border-radius: 24px;
+    background: #f5f7fb;
+    box-shadow:
+        inset 0 0 0 1px rgba(24, 36, 50, 0.06),
+        0 26px 60px rgba(32, 48, 64, 0.14);
+    overflow: hidden;
+}
+
+.screen-component {
+    position: absolute;
+    cursor: move;
+    user-select: none;
+    border-radius: 18px;
+    transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.screen-component:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 24px rgba(44, 62, 80, 0.14);
+}
+
+.screen-component.selected {
+    box-shadow: 0 0 0 3px rgba(44, 125, 160, 0.26), 0 18px 30px rgba(44, 125, 160, 0.18);
+}
+
+.screen-component.text-component {
+    display: flex;
+    align-items: center;
+    padding: 14px 18px;
+    line-height: 1.5;
+}
+
+.text-component-content {
+    width: 100%;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.screen-component.image-component {
+    background: rgba(234, 241, 246, 0.95);
+    border: 1px solid rgba(36, 90, 115, 0.10);
+    overflow: hidden;
+}
+
+.image-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    color: #6a7d8f;
+    font-size: 14px;
+    text-align: center;
+    line-height: 1.6;
+    background: linear-gradient(145deg, #edf4f8 0%, #e4edf4 100%);
+}
+
+.image-fill {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.prop-content {
+    padding: 0 20px 20px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.prop-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(247, 250, 252, 0.98), rgba(240, 245, 249, 0.98));
+    border: 1px solid rgba(24, 36, 50, 0.08);
+}
+
+.prop-section h3 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.prop-hint {
+    margin: 0;
+    color: #687b8b;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.prop-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: #4b6070;
+    margin-bottom: 6px;
+}
+
+.prop-input,
+.prop-textarea,
+.prop-select {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(36, 90, 115, 0.16);
+    background: #ffffff;
+    font-size: 13px;
+    color: #182432;
+}
+
+.prop-textarea {
+    min-height: 110px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.prop-input:focus,
+.prop-textarea:focus,
+.prop-select:focus {
+    outline: none;
+    border-color: #2c7da0;
+    box-shadow: 0 0 0 3px rgba(44, 125, 160, 0.12);
+}
+
+.prop-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.danger-btn {
+    border: none;
+    padding: 11px 16px;
+    border-radius: 12px;
+    background: #c0392b;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.danger-btn:hover {
+    filter: brightness(1.05);
+}
+
+.preview-thumb {
+    width: 100%;
+    border-radius: 16px;
+    border: 1px solid rgba(24, 36, 50, 0.08);
+    background: #f3f7fa;
+}
+
+@media (max-width: 1280px) {
+    .editor-layout {
+        grid-template-columns: 250px minmax(0, 1fr) 300px;
+    }
+}
+
+@media (max-width: 1080px) {
+    .screen-shell {
+        padding: 14px;
+    }
+
+    .screen-topbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .editor-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .components-panel,
+    .properties-panel {
+        min-height: auto;
+    }
+}
