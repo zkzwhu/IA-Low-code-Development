@@ -1,4 +1,4 @@
-import { state, setExpandedPropertyNodeIds, setNextId, setNodes, setSelectedNodeIds } from './appStore.js';
+﻿import { state, setExpandedPropertyNodeIds, setNextId, setNodes, setSelectedNodeIds } from './appStore.js';
 import { addConsoleLog, escapeHtml } from './appUtils.js';
 
 const NODE_W = 180;
@@ -25,7 +25,20 @@ function typeLabel(type) {
         case 'sequence': return "顺序";
         case 'loop': return "循环";
         case 'branch': return "分支";
+        case 'output': return "输出端口";
         default: return type;
+    }
+}
+
+function nodeTypeIcon(type) {
+    switch (type) {
+        case 'start': return '🟢';
+        case 'print': return '🖨️';
+        case 'sequence': return '➡️';
+        case 'loop': return '🔁';
+        case 'branch': return '🔀';
+        case 'output': return '📤';
+        default: return '◻';
     }
 }
 
@@ -572,7 +585,15 @@ export function createNode(type, x, y) {
             baseNode.properties = { name: defaultNameForType(type), nextNodeId: null, portPositions: {}, breakpoint: false };
             break;
         case 'print':
-            baseNode.properties = { name: defaultNameForType(type), message: "Hello, 智慧农业", nextNodeId: null, portPositions: {}, breakpoint: false };
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                messageSource: 'manual',
+                message: "Hello, 智慧农业",
+                variableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
             break;
         case 'sequence':
             baseNode.properties = { name: defaultNameForType(type), comment: "顺序执行", nextNodeId: null, portPositions: {}, breakpoint: false };
@@ -609,6 +630,15 @@ export function createNode(type, x, y) {
                 headerHeight: 54,
                 minWidth: 320,
                 minHeight: 200
+            };
+            break;
+        case 'output':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                variableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
             };
             break;
         default: break;
@@ -907,6 +937,22 @@ function getNodeNameOptions(selectedId, includeNone = false) {
         .join('');
 }
 
+function getWorkflowVariableOptions(selectedId, includeNone = true) {
+    const noneOption = includeNone ? `<option value="" ${selectedId == null ? 'selected' : ''}>请选择变量</option>` : '';
+    return noneOption + (state.workflowVariables || [])
+        .map(variable => `
+            <option value="${variable.id}" ${selectedId === variable.id ? 'selected' : ''}>
+                ${escapeHtml(variable.name)} (${variable.dataType === 'int' ? '整型' : '字符串'})
+            </option>
+        `)
+        .join('');
+}
+
+function getWorkflowVariableById(variableId) {
+    if (!variableId) return null;
+    return (state.workflowVariables || []).find(variable => variable.id === String(variableId)) || null;
+}
+
 function getNodeContextInfo(node) {
     if (!node || node.parentId == null) return [];
     const parentNode = state.nodes.get(node.parentId);
@@ -972,9 +1018,20 @@ function renderNodePropertyEditor(node, options = {}) {
         html += `<div class="prop-group"><label class="prop-label">下一个节点（顺序流）</label>
         <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     } else if (node.type === 'print') {
-        html += `<div class="prop-group"><label class="prop-label">打印消息</label>
-        <input class="prop-input" data-node-id="${node.id}" data-field="message" value="${escapeHtml(props.message || '')}" placeholder="输出内容"></div>
-        <div class="prop-group"><label class="prop-label">执行后下一节点</label>
+        const messageSource = props.messageSource === 'variable' ? 'variable' : 'manual';
+        html += `<div class="prop-group"><label class="prop-label">打印内容来源</label>
+        <select class="prop-select" data-node-id="${node.id}" data-field="messageSource">
+            <option value="manual" ${messageSource === 'manual' ? 'selected' : ''}>固定文本</option>
+            <option value="variable" ${messageSource === 'variable' ? 'selected' : ''}>本地变量</option>
+        </select></div>`;
+        if (messageSource === 'manual') {
+            html += `<div class="prop-group"><label class="prop-label">打印文本</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="message" value="${escapeHtml(props.message || '')}" placeholder="输出内容"></div>`;
+        } else {
+            html += `<div class="prop-group"><label class="prop-label">选择变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="variableId">${getWorkflowVariableOptions(props.variableId, true)}</select></div>`;
+        }
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
         <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     } else if (node.type === 'sequence') {
         html += `<div class="prop-group"><label class="prop-label">备注</label>
@@ -1016,6 +1073,13 @@ function renderNodePropertyEditor(node, options = {}) {
             ${renderContainerBodyList(node, props.falseBodyNodeIds, 'branchFalseBody', '假分支为空：从假分支端口连线到目标节点即可加入。')}
         </div>`;
         html += `<div class="prop-group"><label class="prop-label">分支结束后节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'output') {
+        html += `<div class="prop-group"><label class="prop-label">绑定变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="variableId">${getWorkflowVariableOptions(props.variableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">该节点会把选中的变量暴露给项目端口，供大屏应用调用。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     }
 
@@ -1087,6 +1151,7 @@ function renderPropertiesPanel() {
             let val = el.value;
             if (field === "loopCount") val = parseInt(val, 10) || 1;
             if (field === "branchCondition") val = (val === "true");
+            if (field === "variableId") val = val === "" ? null : val;
             if (field === "name") {
                 const r = ensureUniqueNameWithinType(node.type, val, node.id);
                 if (!r.ok) {
@@ -1584,7 +1649,12 @@ export function renderCanvas() {
 
         const label = typeLabel(node.type);
         let bodyPreview = "";
-        if(node.type === 'print') bodyPreview = `✉️ ${node.properties.message?.substring(0, 20) || "打印"}`;
+        if(node.type === 'print') {
+            const variable = getWorkflowVariableById(node.properties?.variableId);
+            bodyPreview = node.properties?.messageSource === 'variable'
+                ? `变量: ${escapeHtml(variable?.name || "未选择变量")}`
+                : `✉️ ${escapeHtml(node.properties.message?.substring(0, 20) || "打印")}`;
+        }
         else if(node.type === 'loop') {
             const condType = node.properties.loopConditionType || "count";
             const condText = condType === 'expr' ? (node.properties.loopConditionExpr || "(空)") : `${node.properties.loopCount ?? 1} 次`;
@@ -1597,6 +1667,10 @@ export function renderCanvas() {
             bodyPreview = `Branch: ${node.properties.branchCondition ? "True" : "False"}<br/>True: ${tCnt} / False: ${fCnt}`;
         }
         else if(node.type === 'start') bodyPreview = "入口节点";
+        else if(node.type === 'output') {
+            const variable = getWorkflowVariableById(node.properties?.variableId);
+            bodyPreview = `输出变量: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
         else bodyPreview = node.properties.comment || "顺序节点";
 
         const nodeName = node.properties?.name || label;
@@ -1625,7 +1699,7 @@ export function renderCanvas() {
 
         // 端口
         let connectPointsHtml = '';
-        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence') {
+        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output') {
             connectPointsHtml = `<div class="connect-point" data-id="${node.id}" data-field="nextNodeId" style="${portStyle('nextNodeId', 50)} --cp-color:#3498db; --cp-hover-color:#2c7da0;" title="端口：下一步（next）【Shift+拖动可移动端口】"></div>`;
         } else if (node.type === 'loop') {
             connectPointsHtml = `
@@ -1659,7 +1733,10 @@ export function renderCanvas() {
 
         nodeDiv.innerHTML = `
             <div class="node-header">
-                <span title="节点类型">${label}</span>
+                <span class="node-title-wrap" title="节点类型">
+                    <span class="node-title-icon">${nodeTypeIcon(node.type)}</span>
+                    <span>${label}</span>
+                </span>
                 <span class="node-type-badge" title="节点名称">${escapeHtml(nodeName)}</span>
                 ${bpDotHtml}
                 <button class="delete-node-btn" data-id="${node.id}" title="删除节点">🗑️</button>
@@ -2693,7 +2770,7 @@ function createConnection(sourceId, targetId, fieldOverride = null) {
     }
 
     let fieldOptions = [];
-    if (sourceNode.type === 'start' || sourceNode.type === 'print' || sourceNode.type === 'sequence') {
+    if (sourceNode.type === 'start' || sourceNode.type === 'print' || sourceNode.type === 'sequence' || sourceNode.type === 'output') {
         fieldOptions = ['nextNodeId'];
     } else if (sourceNode.type === 'loop') {
         fieldOptions = ['loopBody', 'nextNodeId'];

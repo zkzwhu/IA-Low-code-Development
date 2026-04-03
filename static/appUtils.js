@@ -1,13 +1,13 @@
-import { state } from './appStore.js';
+﻿import { state } from './appStore.js';
 
 const CONSOLE_CONFIG = {
     run: {
         elementId: 'consoleOutput',
-        placeholder: '准备就绪，拖拽组件到画布并运行工作流查看结果。'
+        placeholder: '准备就绪，拖拽节点到画布后即可运行工作流。'
     },
     debug: {
         elementId: 'debugConsoleOutput',
-        placeholder: '进入调试模式后，这里会输出当前节点、断点命中和单步执行信息。'
+        placeholder: '进入调试模式后，这里会显示节点执行、断点和变量变化。'
     }
 };
 
@@ -32,8 +32,8 @@ function createLogLine(msg, type) {
     const prefix = document.createElement('span');
     prefix.className = 'log-prefix';
     prefix.textContent = type === 'error'
-        ? '✖'
-        : (type === 'debug' ? '🐞' : (type === 'run' ? '▶' : 'ℹ'));
+        ? '错误'
+        : (type === 'debug' ? '调试' : (type === 'run' ? '运行' : '提示'));
 
     const text = document.createElement('span');
     text.className = 'log-text';
@@ -76,14 +76,15 @@ export function displayLogs(logs) {
     }
 
     const filtered = logs.filter(line => {
-        return line.includes('==========') ||
-               line.includes('打印:') ||
-               line.includes('错误') ||
-               line.includes('警告');
+        return line.includes('开始执行') ||
+            line.includes('执行完成') ||
+            line.includes('打印:') ||
+            line.includes('错误') ||
+            line.includes('警告');
     });
 
     if (filtered.length === 0) {
-        filtered.push('执行完成，无输出日志');
+        filtered.push('执行完成，无额外输出日志。');
     }
 
     filtered.forEach(log => addConsoleLog(log, 'run', 'run'));

@@ -153,13 +153,29 @@ body {
     cursor: grab;
 }
 
+.component-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.component-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+    background: rgba(36, 90, 115, 0.10);
+    font-size: 18px;
+}
+
 .component-card:active {
     cursor: grabbing;
 }
 
 .component-card strong {
-    display: block;
-    margin-bottom: 6px;
     font-size: 16px;
 }
 

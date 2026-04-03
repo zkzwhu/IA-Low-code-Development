@@ -655,7 +655,18 @@ body {
     font-weight: bold;
     font-size: 13px;
     display: flex;
-    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+.node-title-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.node-title-icon {
+    font-size: 15px;
+    line-height: 1;
 }
 .node-body {
     padding: 12px 10px;
@@ -670,6 +681,7 @@ body {
     padding: 2px 8px;
     border-radius: 20px;
     font-size: 10px;
+    margin-left: auto;
 }
 .delete-node-btn {
     background: none;

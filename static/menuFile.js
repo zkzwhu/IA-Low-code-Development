@@ -1,4 +1,4 @@
-import { state } from './appStore.js';
+﻿import { state } from './appStore.js';
 import { addConsoleLog, escapeHtml, showModal } from './appUtils.js';
 import { createNewWorkflowProject, listWorkflowProjects, openWorkflowProjectById, saveCurrentWorkflowProject } from './workflowProjectService.js';
 
@@ -81,7 +81,11 @@ function openProjectPicker() {
 }
 
 export function initFileMenu() {
-    document.getElementById('newProjectBtn').onclick = newProject;
-    document.getElementById('saveProjectBtn').onclick = saveProjectLocally;
-    document.getElementById('loadProjectBtn').onclick = openProjectPicker;
+    const newProjectBtn = document.getElementById('newProjectBtn');
+    const saveProjectBtn = document.getElementById('saveProjectBtn');
+    const loadProjectBtn = document.getElementById('loadProjectBtn');
+
+    if (newProjectBtn) newProjectBtn.onclick = newProject;
+    if (saveProjectBtn) saveProjectBtn.onclick = saveProjectLocally;
+    if (loadProjectBtn) loadProjectBtn.onclick = openProjectPicker;
 }

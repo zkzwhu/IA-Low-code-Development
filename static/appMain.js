@@ -1,55 +1,55 @@
-import { state, setActiveCanvasTool, setActiveConsoleTab, setCanvasZoom, setDebugCurrentNodeId } from './appStore.js';
+﻿import { state, setActiveCanvasTool, setActiveConsoleTab, setCanvasZoom, setDebugCurrentNodeId } from './appStore.js';
 import { addConsoleLog, clearConsole, displayLogs, showModal } from './appUtils.js';
-import { autoArrangeNodes, canUndoCanvasChange, captureCanvasHistorySnapshot, commitCanvasHistorySnapshot, copySelectedNodes, createNode, cutSelectedNodes, deleteSelectedNodes, pasteClipboardNodes, placeNodeWithoutOverlapById, renderCanvas, resetCanvasHistory, setSelectedNode, undoCanvasChange } from './nodeManager.js';
+import { autoArrangeNodes, canUndoCanvasChange, captureCanvasHistorySnapshot, commitCanvasHistorySnapshot, copySelectedNodes, createNode, cutSelectedNodes, deleteSelectedNodes, pasteClipboardNodes, placeNodeWithoutOverlapById, renderCanvas, undoCanvasChange } from './nodeManager.js';
 import { initFileMenu } from './menuFile.js';
 import { initProjectMenu } from './menuProject.js';
 import { initSettingsMenu } from './menuSettings.js';
 import { initWindowMenu } from './menuWindow.js';
+import { saveWorkflowRuntime } from './workflowRuntimeStore.js';
 import { initializeWorkflowProjectFromEntry, startWorkflowAutoSave } from './workflowProjectService.js';
 
 let debugSessionId = null;
-const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch']);
+const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output']);
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
 const COMPONENT_LIBRARY = [
     {
-        id: 'collection',
-        title: '信息收集',
-        description: '收集流程入口与基础采集节点',
-        icon: '🧭',
+        id: 'entry',
+        title: '流程入口',
+        description: '用于开始执行工作流。',
+        icon: '🚀',
         expanded: true,
         items: [
-            { type: 'start', icon: '🟢', title: '开始节点', desc: '工作流入口' }
+            { type: 'start', icon: '🟢', title: '开始节点', desc: '工作流的起点。' }
         ]
     },
     {
-        id: 'processing',
-        title: '信息处理',
-        description: '处理逻辑判断与流程输出',
+        id: 'logic',
+        title: '流程逻辑',
+        description: '控制顺序、循环与分支。',
         icon: '🧠',
         expanded: true,
         items: [
-            { type: 'print', icon: '🖨️', title: '打印节点', desc: '输出调试信息' },
-            { type: 'loop', icon: '🔄', title: '循环节点', desc: '重复执行指定次数' },
-            { type: 'branch', icon: '🌿', title: '分支节点', desc: '根据条件选择路径' }
+            { type: 'print', icon: '🖨️', title: '打印节点', desc: '输出文本或变量值。' },
+            { type: 'sequence', icon: '➡️', title: '顺序节点', desc: '占位或串联执行流程。' },
+            { type: 'loop', icon: '🔁', title: '循环节点', desc: '重复执行循环体。' },
+            { type: 'branch', icon: '🔀', title: '分支节点', desc: '根据条件选择路径。' }
         ]
     },
     {
-        id: 'variable',
-        title: '变量处理',
-        description: '处理变量流转与顺序执行',
-        icon: '🧮',
+        id: 'data',
+        title: '变量与输出',
+        description: '让工作流结果可以被大屏应用绑定。',
+        icon: '📦',
         expanded: true,
         items: [
-            { type: 'sequence', icon: '🔁', title: '顺序节点', desc: '占位/传递执行流' }
+            { type: 'output', icon: '📤', title: '输出端口节点', desc: '引用本地变量并暴露给项目端口。' }
         ]
     }
 ];
 const expandedComponentGroups = new Set(
-    COMPONENT_LIBRARY
-        .filter(group => group.expanded !== false)
-        .map(group => group.id)
+    COMPONENT_LIBRARY.filter(group => group.expanded !== false).map(group => group.id)
 );
 
 function getComponentLibraryItem(type) {
@@ -104,11 +104,8 @@ function initComponentLibrary() {
         const groupId = toggleBtn.getAttribute('data-group-toggle');
         if (!groupId) return;
 
-        if (expandedComponentGroups.has(groupId)) {
-            expandedComponentGroups.delete(groupId);
-        } else {
-            expandedComponentGroups.add(groupId);
-        }
+        if (expandedComponentGroups.has(groupId)) expandedComponentGroups.delete(groupId);
+        else expandedComponentGroups.add(groupId);
 
         renderComponentLibrary();
     });
@@ -170,48 +167,21 @@ function updateCanvasToolbarUi() {
     const hint = document.getElementById('canvasToolHint');
     const zoomStatus = document.getElementById('canvasZoomStatus');
     const toolMeta = {
-        select: {
-            label: '选择',
-            tip: '选择模式：左键拖动节点，按住 Alt 再按左键可拖动画布。'
-        },
-        connect: {
-            label: '连线',
-            tip: '连线模式：从节点端口拖到目标节点以建立连接。'
-        },
-        zoom: {
-            label: '缩放',
-            tip: '缩放模式：单击放大，按住 Shift 单击缩小，也可使用鼠标滚轮缩放。'
-        },
-        delete: {
-            label: '删除',
-            tip: '删除模式：点击可删单个节点，按住左键拖动可擦除路径上的节点。'
-        },
-        arrange: {
-            label: '整理',
-            tip: '整理画布：按程序执行逻辑，从左到右自动排布节点。'
-        },
-        undo: {
-            label: '撤回',
-            tip: '撤回上一步画布修改，例如拖拽、连线、删除、粘贴或属性变更。'
-        },
-        copy: {
-            label: '复制',
-            tip: '复制当前选中的节点；会保留节点属性和容器关系，但不保留连接关系。'
-        },
-        cut: {
-            label: '剪切',
-            tip: '剪切当前选中的节点；会复制节点结构后从画布移除。'
-        },
-        paste: {
-            label: '粘贴',
-            tip: '将剪贴板中的节点粘贴到当前视口或右键菜单位置。'
-        }
+        select: { label: '选择', tip: '选择节点或拖动节点位置，按住 Alt 再拖动画布。' },
+        connect: { label: '连接', tip: '从节点右侧端口拖到目标节点，创建连接。' },
+        zoom: { label: '缩放', tip: '单击放大，按住 Shift 单击缩小，也可滚轮缩放。' },
+        delete: { label: '删除', tip: '点击删除节点，或拖动鼠标扫过多个节点删除。' },
+        arrange: { label: '整理', tip: '按执行逻辑自动整理根节点布局。' },
+        undo: { label: '撤回', tip: '撤回上一步画布修改。' },
+        copy: { label: '复制', tip: '复制当前选中的节点。' },
+        cut: { label: '剪切', tip: '剪切当前选中的节点。' },
+        paste: { label: '粘贴', tip: '将剪贴板中的节点粘贴到当前视图。' }
     };
     const toolText = {
-        select: '选择模式：按住 Alt 再按左键可拖动画布。',
-        connect: '连线模式：从节点端口拖到目标节点以建立连接。',
-        zoom: `缩放模式：单击放大，Shift+单击缩小，滚轮缩放。当前 ${Math.round((state.canvasZoom || 1) * 100)}%。`,
-        delete: '删除模式：点击可删单个节点，按住左键拖动可擦除路径上的节点。'
+        select: '选择模式：拖动节点修改位置，按住 Alt 再拖动画布。',
+        connect: '连接模式：从节点右侧端口拖到目标节点建立连接。',
+        zoom: `缩放模式：滚轮或点击缩放，当前 ${Math.round((state.canvasZoom || 1) * 100)}%。`,
+        delete: '删除模式：点击删除节点，或按住左键扫过多个节点删除。'
     };
 
     const applyMeta = (id, metaKey) => {
@@ -220,7 +190,6 @@ function updateCanvasToolbarUi() {
         if (!button || !meta) return;
         button.textContent = meta.label;
         button.setAttribute('title', meta.tip);
-        button.removeAttribute('data-tooltip');
     };
 
     applyMeta('selectToolBtn', 'select');
@@ -345,23 +314,20 @@ function bindCanvasToolbar() {
 
     const arrangeBtn = document.getElementById('arrangeCanvasBtn');
     const undoBtn = document.getElementById('undoCanvasBtn');
-    if (arrangeBtn) {
-        arrangeBtn.onclick = () => {
-            autoArrangeNodes();
-            updateCanvasToolbarUi();
-            addConsoleLog('已按执行逻辑从左到右整理节点。', 'info', 'run');
-        };
-    }
-    if (undoBtn) {
-        undoBtn.onclick = () => {
-            if (undoCanvasChange()) updateCanvasToolbarUi();
-        };
-    }
-
     const copyBtn = document.getElementById('copyCanvasBtn');
     const cutBtn = document.getElementById('cutCanvasBtn');
     const pasteBtn = document.getElementById('pasteCanvasBtn');
 
+    if (arrangeBtn) {
+        arrangeBtn.onclick = () => {
+            autoArrangeNodes();
+            updateCanvasToolbarUi();
+            addConsoleLog('已按执行逻辑整理节点布局。', 'info', 'run');
+        };
+    }
+    if (undoBtn) undoBtn.onclick = () => {
+        if (undoCanvasChange()) updateCanvasToolbarUi();
+    };
     if (copyBtn) copyBtn.onclick = () => copySelectedNodes();
     if (cutBtn) cutBtn.onclick = () => cutSelectedNodes();
     if (pasteBtn) pasteBtn.onclick = () => pasteClipboardNodes();
@@ -410,7 +376,7 @@ function prepareConsolePanel() {
                             <div class="debug-box" id="debugCurrentNodeBox">（未开始调试）</div>
                         </div>
                         <div class="debug-section">
-                            <div class="debug-section-title">调用栈 / 上下文</div>
+                            <div class="debug-section-title">执行栈 / 上下文</div>
                             <div class="debug-box" id="debugStackBox">（未开始调试）</div>
                         </div>
                         <div class="debug-section">
@@ -435,7 +401,7 @@ function initDragDrop() {
     const canvasArea = document.getElementById('canvasArea');
 
     if (!canvasArea || !componentsPanel) {
-        addConsoleLog('画布区域未找到，拖拽功能可能失效', 'error');
+        addConsoleLog('画布区域未找到，拖拽功能可能失效。', 'error');
         return;
     }
 
@@ -472,7 +438,7 @@ function initDragDrop() {
 
         const newNode = createNode(type, x, y);
         if (!newNode) {
-            addConsoleLog(`创建节点失败：类型 ${type}`, 'error');
+            addConsoleLog(`创建节点失败：${type}`, 'error');
             return;
         }
 
@@ -480,9 +446,8 @@ function initDragDrop() {
         placeNodeWithoutOverlapById(newNode.id, { x, y });
         commitCanvasHistorySnapshot(beforeSnapshot);
         renderCanvas();
-        setSelectedNode(newNode.id);
         const componentItem = getComponentLibraryItem(type);
-        addConsoleLog(`已添加 ${componentItem?.title || type}，ID:${newNode.id}`, 'info');
+        addConsoleLog(`已添加 ${componentItem?.title || type}，ID: ${newNode.id}`, 'info');
     });
 }
 
@@ -538,37 +503,61 @@ function appendDebugSnapshot(debugState, title) {
 
     if (debugState.currentNode) {
         const node = debugState.currentNode;
-        lines.push(`暂停在节点: ${node.name} (#${node.id}, ${node.type})`);
+        lines.push(`暂停在节点 ${node.name} (#${node.id}, ${node.type})`);
     } else {
-        lines.push('当前没有可执行节点，调试会话已结束。');
+        lines.push('当前没有可执行节点，调试会话已经结束。');
     }
 
-    if (debugState.loopText) {
-        lines.push(`循环上下文: ${debugState.loopText}`);
-    }
-
+    if (debugState.loopText) lines.push(`循环上下文：${debugState.loopText}`);
     addConsoleLog(lines.join('\n'), 'debug', 'debug');
+}
+
+function buildWorkflowPayload() {
+    return {
+        nodes: Array.from(state.nodes.values()),
+        workflow_variables: state.workflowVariables || [],
+        workflow_ports: state.workflowPorts || []
+    };
 }
 
 async function runWorkflow() {
     setConsoleTab('run');
 
-    const data = { nodes: Array.from(state.nodes.values()) };
     try {
         const response = await fetch('/api/workflow/execute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: JSON.stringify(buildWorkflowPayload())
         });
         const result = await response.json();
+        if (response.ok && state.currentProject?.id) {
+            const portValuesByName = result?.port_values && typeof result.port_values === 'object'
+                ? result.port_values
+                : {};
+            const portValuesById = {};
+
+            for (const port of state.workflowPorts || []) {
+                const portId = String(port?.id || '');
+                const portName = String(port?.name || '').trim();
+                if (!portId || !portName) continue;
+                if (Object.prototype.hasOwnProperty.call(portValuesByName, portName)) {
+                    portValuesById[portId] = portValuesByName[portName];
+                }
+            }
+
+            saveWorkflowRuntime(state.currentProject.id, {
+                portValuesById,
+                portValuesByName
+            });
+        }
         if (result.logs && result.logs.length) {
             displayLogs(result.logs);
         } else {
             clearConsole('run');
-            addConsoleLog('执行完成，无输出日志', 'run', 'run');
+            addConsoleLog('执行完成，无输出日志。', 'run', 'run');
         }
     } catch (e) {
-        addConsoleLog(`执行时发生错误: ${e.message}`, 'error', 'run');
+        addConsoleLog(`执行时发生错误：${e.message}`, 'error', 'run');
     }
 }
 
@@ -576,18 +565,16 @@ async function debugStart() {
     setConsoleTab('debug');
     clearConsole('debug');
 
-    const data = { nodes: Array.from(state.nodes.values()) };
-
     try {
         const resp = await fetch('/api/debug/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
+            body: JSON.stringify(buildWorkflowPayload())
         });
         const result = await resp.json();
 
         if (!resp.ok) {
-            addConsoleLog(`进入调试失败: ${result.error || resp.status}`, 'error', 'debug');
+            addConsoleLog(`进入调试失败：${result.error || resp.status}`, 'error', 'debug');
             return;
         }
 
@@ -596,7 +583,7 @@ async function debugStart() {
         addConsoleLog('已进入调试模式，可以开始单步执行或继续运行。', 'info', 'debug');
         appendDebugSnapshot(result.state, '调试已就绪');
     } catch (e) {
-        addConsoleLog(`进入调试失败: ${e.message}`, 'error', 'debug');
+        addConsoleLog(`进入调试失败：${e.message}`, 'error', 'debug');
     }
 }
 
@@ -612,7 +599,7 @@ async function runDebugAction(endpoint, failLabel, snapshotTitle) {
         const result = await resp.json();
 
         if (!resp.ok) {
-            addConsoleLog(`${failLabel}: ${result.error || resp.status}`, 'error', 'debug');
+            addConsoleLog(`${failLabel}：${result.error || resp.status}`, 'error', 'debug');
             return;
         }
 
@@ -631,7 +618,7 @@ async function runDebugAction(endpoint, failLabel, snapshotTitle) {
             addConsoleLog('调试已结束。', 'info', 'debug');
         }
     } catch (e) {
-        addConsoleLog(`${failLabel}: ${e.message}`, 'error', 'debug');
+        addConsoleLog(`${failLabel}：${e.message}`, 'error', 'debug');
     }
 }
 
@@ -653,7 +640,7 @@ async function debugStop() {
             body: JSON.stringify({ session_id: debugSessionId })
         });
     } catch (e) {
-        addConsoleLog(`停止调试时发生错误: ${e.message}`, 'error', 'debug');
+        addConsoleLog(`停止调试时发生错误：${e.message}`, 'error', 'debug');
     }
 
     debugSessionId = null;
@@ -663,10 +650,7 @@ async function debugStop() {
 }
 
 function initializeProjectData() {
-    const result = initializeWorkflowProjectFromEntry();
-    if (result?.source === 'demo') {
-        initDemoFlow();
-    }
+    initializeWorkflowProjectFromEntry();
 }
 
 function updateCurrentProjectBadge() {
@@ -674,57 +658,6 @@ function updateCurrentProjectBadge() {
     if (!badge) return;
     badge.textContent = state.currentProject?.name || '未命名工作流';
     badge.title = state.currentProject?.name || '未命名工作流';
-}
-
-function initDemoFlow() {
-    const start = createNode('start', 50, 80);
-    const print1 = createNode('print', 280, 80);
-    print1.properties.message = '开始执行农业监测任务';
-
-    const loopNode = createNode('loop', 280, 220);
-    loopNode.properties.loopCount = 2;
-
-    const innerPrint = createNode('print', 500, 150);
-    innerPrint.properties.message = '循环体内部：检查土壤湿度';
-
-    const branchNode = createNode('branch', 500, 320);
-    branchNode.properties.branchCondition = true;
-
-    const truePrint = createNode('print', 740, 280);
-    truePrint.properties.message = '条件满足：开启灌溉阀门';
-
-    const falsePrint = createNode('print', 740, 400);
-    falsePrint.properties.message = '条件不满足：保持待机';
-
-    start.properties.nextNodeId = print1.id;
-    print1.properties.nextNodeId = loopNode.id;
-
-    loopNode.properties.bodyNodeIds = [innerPrint.id];
-    innerPrint.parentId = loopNode.id;
-    innerPrint.localX = 20;
-    innerPrint.localY = 20;
-    loopNode.properties.nextNodeId = branchNode.id;
-
-    branchNode.properties.trueBodyNodeIds = [truePrint.id];
-    branchNode.properties.falseBodyNodeIds = [falsePrint.id];
-
-    truePrint.parentId = branchNode.id;
-    truePrint.properties.branchSide = 'true';
-    truePrint.localX = 20;
-    truePrint.localY = 28;
-
-    falsePrint.parentId = branchNode.id;
-    falsePrint.properties.branchSide = 'false';
-    falsePrint.localX = 20;
-    falsePrint.localY = 28;
-
-    [start, print1, loopNode, innerPrint, branchNode, truePrint, falsePrint].forEach(node => {
-        state.nodes.set(node.id, node);
-    });
-
-    resetCanvasHistory();
-    renderCanvas();
-    addConsoleLog('已加载示例工作流，可直接运行或进入调试模式查看效果。', 'info', 'run');
 }
 
 function bindConsoleTabs() {
@@ -747,19 +680,12 @@ function bindGlobalButtons() {
     const clearCanvasBtn = document.getElementById('clearCanvasBtn');
 
     if (runBtn) runBtn.onclick = runWorkflow;
-    if (clearBtn) {
-        clearBtn.onclick = () => clearConsole(state.activeConsoleTab);
-    }
+    if (clearBtn) clearBtn.onclick = () => clearConsole(state.activeConsoleTab);
     if (startDebugBtn) startDebugBtn.onclick = debugStart;
     if (debugContinueBtn) debugContinueBtn.onclick = debugContinue;
     if (debugStepBtn) debugStepBtn.onclick = debugStep;
     if (debugStopBtn) debugStopBtn.onclick = debugStop;
-
-    if (deleteSelectedBtn) {
-        deleteSelectedBtn.onclick = () => {
-            deleteSelectedNodes();
-        };
-    }
+    if (deleteSelectedBtn) deleteSelectedBtn.onclick = () => deleteSelectedNodes();
 
     if (clearCanvasBtn) {
         clearCanvasBtn.onclick = () => {
@@ -775,7 +701,6 @@ function bindGlobalButtons() {
                     setDebugCurrentNodeId(null);
                     commitCanvasHistorySnapshot(beforeSnapshot);
                     renderCanvas();
-                    setSelectedNode(null);
                     renderDebugState(null);
                     updateCanvasToolbarUi();
                 }
@@ -832,7 +757,6 @@ export function init() {
     initComponentLibrary();
     initDragDrop();
     bindCanvasZoomInteractions();
-    initDemoFlow();
     initFileMenu();
     initProjectMenu();
     initSettingsMenu();
@@ -844,6 +768,7 @@ export function init() {
     setConsoleTab(state.activeConsoleTab);
     updateCanvasToolbarUi();
     renderDebugState(null);
+    initializeProjectData();
     updateCurrentProjectBadge();
     window.addEventListener('workflow-project-changed', updateCurrentProjectBadge);
     startWorkflowAutoSave();

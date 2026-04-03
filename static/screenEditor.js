@@ -1,5 +1,6 @@
 ﻿
 import { getProjectById, listProjectsByType } from './projectRepository.js';
+import { getWorkflowRuntime } from './workflowRuntimeStore.js';
 
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const SOURCE_MODE_MANUAL = 'manual';
@@ -9,11 +10,13 @@ const DEFAULT_PAGE = { width: 1440, height: 900, background: '#f5f7fb' };
 const COMPONENT_LIBRARY = [
     {
         type: 'text',
+        icon: '📝',
         title: '文本展示',
-        description: '显示固定文本，或绑定已有工作流中的字符串/整形端口。'
+        description: '显示固定文本，或绑定已有工作流中的字符串/整型端口。'
     },
     {
         type: 'image',
+        icon: '🖼️',
         title: '图片展示',
         description: '上传图片，或绑定已有工作流中的字符串端口作为图片地址。'
     }
@@ -151,7 +154,7 @@ function getSupportedPortTypes(componentType) {
 }
 
 function getPortTypeLabel(dataType) {
-    return dataType === 'int' ? '整形' : '字符串';
+    return dataType === 'int' ? '整型' : '字符串';
 }
 
 function getWorkflowPortsForProject(projectId) {
@@ -165,6 +168,118 @@ function getWorkflowPortsForProject(projectId) {
             dataType: port?.dataType === 'int' ? 'int' : 'string'
         }))
         : [];
+}
+
+function getWorkflowProjectRuntimeContext(projectId) {
+    const project = getProjectById(projectId);
+    if (!project || project.type !== 'workflow') return null;
+
+    const nodes = Array.isArray(project.data?.nodes) ? project.data.nodes : [];
+    const variables = Array.isArray(project.data?.workflow_variables) ? project.data.workflow_variables : [];
+    const ports = Array.isArray(project.data?.workflow_ports) ? project.data.workflow_ports : [];
+
+    const variableMap = new Map();
+    for (const variable of variables) {
+        const variableId = String(variable?.id || '');
+        if (!variableId) continue;
+        const dataType = variable?.dataType === 'int' ? 'int' : 'string';
+        variableMap.set(variableId, {
+            id: variableId,
+            name: String(variable?.name || variableId),
+            dataType,
+            defaultValue: dataType === 'int'
+                ? (Number.isFinite(Number(variable?.defaultValue)) ? Number(variable.defaultValue) : 0)
+                : String(variable?.defaultValue ?? '')
+        });
+    }
+
+    return {
+        project,
+        nodesById: new Map(nodes.map(node => [Number(node?.id), node])),
+        ports,
+        variableMap
+    };
+}
+
+function resolveVariableDefaultValue(variable) {
+    if (!variable) return '';
+    return variable.dataType === 'int'
+        ? (Number.isFinite(Number(variable.defaultValue)) ? Number(variable.defaultValue) : 0)
+        : String(variable.defaultValue ?? '');
+}
+
+function resolveWorkflowPortRuntimeValue(projectId, portId) {
+    const context = getWorkflowProjectRuntimeContext(projectId);
+    if (!context) return { ok: false, reason: 'missing-project' };
+
+    const port = context.ports.find(item => String(item?.id || '') === String(portId));
+    if (!port) return { ok: false, reason: 'missing-port', project: context.project };
+
+    const runtime = getWorkflowRuntime(projectId);
+    const runtimeById = runtime?.portValuesById && typeof runtime.portValuesById === 'object'
+        ? runtime.portValuesById
+        : null;
+    const runtimeByName = runtime?.portValuesByName && typeof runtime.portValuesByName === 'object'
+        ? runtime.portValuesByName
+        : null;
+    const portIdKey = String(port.id || '');
+    const portNameKey = String(port.name || '').trim();
+
+    if (runtimeById && Object.prototype.hasOwnProperty.call(runtimeById, portIdKey)) {
+        return {
+            ok: true,
+            value: runtimeById[portIdKey],
+            source: 'runtime',
+            updatedAt: runtime.updatedAt,
+            project: context.project,
+            port
+        };
+    }
+
+    if (runtimeByName && portNameKey && Object.prototype.hasOwnProperty.call(runtimeByName, portNameKey)) {
+        return {
+            ok: true,
+            value: runtimeByName[portNameKey],
+            source: 'runtime',
+            updatedAt: runtime.updatedAt,
+            project: context.project,
+            port
+        };
+    }
+
+    const nodeId = Number(port?.nodeId);
+    const node = context.nodesById.get(nodeId);
+    if (!node) {
+        return { ok: false, reason: 'missing-node', project: context.project, port };
+    }
+
+    const field = String(port?.field || '');
+    if (field === 'outputValue') {
+        const variableId = node?.properties?.variableId;
+        const variable = context.variableMap.get(String(variableId || ''));
+        if (!variable) {
+            return { ok: false, reason: 'missing-variable', project: context.project, port, node };
+        }
+
+        return {
+            ok: true,
+            value: resolveVariableDefaultValue(variable),
+            source: 'variable-default',
+            project: context.project,
+            port,
+            node,
+            variable
+        };
+    }
+
+    return {
+        ok: true,
+        value: node?.properties?.[field] ?? '',
+        source: 'node-property',
+        project: context.project,
+        port,
+        node
+    };
 }
 
 function getCompatibleWorkflowPorts(componentType, projectId) {
@@ -218,6 +333,8 @@ function resolveWorkflowBinding(component) {
         return { mode: SOURCE_MODE_WORKFLOW_PORT, valid: false, reason: 'unsupported-type', project, port, source };
     }
 
+    const runtimeValue = resolveWorkflowPortRuntimeValue(project.id, port.id);
+
     return {
         mode: SOURCE_MODE_WORKFLOW_PORT,
         valid: true,
@@ -225,7 +342,8 @@ function resolveWorkflowBinding(component) {
         port,
         source,
         label: `${project.name} / ${port.name}`,
-        token: `{{${project.name}.${port.name}}}`
+        token: `{{${project.name}.${port.name}}}`,
+        runtimeValue
     };
 }
 
@@ -234,10 +352,17 @@ function getSourceStatusText(component) {
     if (binding.mode !== SOURCE_MODE_WORKFLOW_PORT) return '当前使用组件内手动填写的内容。';
     if (binding.valid) {
         const typeHint = `当前端口类型：${getPortTypeLabel(binding.port.dataType)}。`;
-        if (component.type === 'image') {
-            return `${typeHint} 运行生成网页后，将把该字符串端口值视为图片 URL 或 Base64 地址。`;
+        let runtimeHint = ' 当前还无法解析出端口值，请检查工作流中的输出节点与变量绑定。';
+        if (binding.runtimeValue?.ok) {
+            const valueText = String(binding.runtimeValue.value ?? '') || '空值';
+            runtimeHint = binding.runtimeValue.source === 'runtime'
+                ? ` 当前显示最近一次运行值：${valueText}。`
+                : ` 当前显示默认值：${valueText}。`;
         }
-        return `${typeHint} 文本组件支持字符串与整形端口。`;
+        if (component.type === 'image') {
+            return `${typeHint}${runtimeHint} 运行生成网页时会把该字符串端口值视为图片 URL 或 Base64 地址。`;
+        }
+        return `${typeHint}${runtimeHint} 文本组件支持字符串与整型端口。`;
     }
     if (binding.reason === 'missing-project') return '绑定的工作流项目不存在，请重新选择。';
     if (binding.reason === 'missing-port') return '绑定的工作流端口不存在，请重新选择。';
@@ -249,7 +374,7 @@ function getTextRenderState(component) {
     const binding = resolveWorkflowBinding(component);
     if (binding.valid) {
         return {
-            text: binding.token,
+            text: binding.runtimeValue?.ok ? String(binding.runtimeValue.value ?? '') : binding.token,
             note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
         };
     }
@@ -257,7 +382,7 @@ function getTextRenderState(component) {
     if (binding.mode === SOURCE_MODE_WORKFLOW_PORT) {
         return {
             text: '请选择可用的工作流端口',
-            note: '仅支持字符串 / 整形端口'
+            note: '仅支持字符串 / 整型端口'
         };
     }
 
@@ -267,10 +392,19 @@ function getTextRenderState(component) {
 function getImageRenderState(component) {
     const binding = resolveWorkflowBinding(component);
     if (binding.valid) {
+        if (binding.runtimeValue?.ok && String(binding.runtimeValue.value ?? '').trim()) {
+            return {
+                kind: 'image',
+                src: String(binding.runtimeValue.value),
+                note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
+            };
+        }
         return {
             kind: 'binding',
             title: '已绑定工作流图片源',
-            note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
+            note: binding.runtimeValue?.ok
+                ? `${binding.label} · 当前值为空`
+                : `${binding.label} · 当前无法解析端口值`
         };
     }
 
@@ -391,7 +525,10 @@ function updateStageAppearance() {
 function renderLibrary() {
     refs.library.innerHTML = COMPONENT_LIBRARY.map(item => `
         <article class="component-card" draggable="true" data-component-type="${item.type}">
-            <strong>${escapeHtml(item.title)}</strong>
+            <div class="component-card-head">
+                <span class="component-card-icon">${escapeHtml(item.icon || '◻')}</span>
+                <strong>${escapeHtml(item.title)}</strong>
+            </div>
             <p>${escapeHtml(item.description)}</p>
         </article>
     `).join('');
@@ -410,7 +547,7 @@ function renderStage() {
         if (component.type === 'image') {
             const imageState = getImageRenderState(component);
             const imageHtml = imageState.kind === 'image'
-                ? `<img class="image-fill" src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}" style="object-fit:${escapeHtml(component.props.objectFit || 'cover')}; border-radius:${Number(component.props.borderRadius) || 0}px;">`
+                ? `<img class="image-fill" src="${escapeHtml(imageState.src)}" alt="${escapeHtml(component.props.alt || '')}" style="object-fit:${escapeHtml(component.props.objectFit || 'cover')}; border-radius:${Number(component.props.borderRadius) || 0}px;">`
                 : `
                     <div class="image-placeholder">
                         <div>
@@ -614,7 +751,7 @@ function renderProperties() {
             </section>
             <section class="prop-section">
                 <h3>使用方式</h3>
-                <p class="prop-hint">从左侧拖拽组件到画布中。文本组件可绑定字符串/整形工作流端口，图片组件可绑定字符串工作流端口。点击右上角“运行生成网页”会在新标签页中打开网页预览。</p>
+                <p class="prop-hint">从左侧拖拽组件到画布中。文本组件可绑定字符串/整型工作流端口，图片组件可绑定字符串工作流端口。点击右上角“运行生成网页”会在新标签页中打开网页预览。</p>
             </section>
         `;
         bindPagePropertyInputs();
@@ -962,12 +1099,11 @@ function buildPreviewHtml() {
             const imageState = getImageRenderState(component);
             const previewDataAttrs = getPreviewDataAttributes(component);
             const imageContent = imageState.kind === 'image'
-                ? `<img src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}" style="width:100%;height:100%;object-fit:${escapeHtml(component.props.objectFit || 'cover')};border-radius:${Number(component.props.borderRadius) || 0}px;">`
+                ? `<img src="${escapeHtml(imageState.src)}" alt="${escapeHtml(component.props.alt || '')}" style="width:100%;height:100%;object-fit:${escapeHtml(component.props.objectFit || 'cover')};border-radius:${Number(component.props.borderRadius) || 0}px;">`
                 : `
                     <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:18px;background:linear-gradient(145deg,#edf4f8 0%,#e4edf4 100%);color:#66788a;text-align:center;font:16px/1.6 Segoe UI,sans-serif;">
                         <div>
                             <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(imageState.title)}</div>
-                            <div style="font-size:12px;opacity:0.9;">${escapeHtml(imageState.note || '')}</div>
                         </div>
                     </div>
                 `;
@@ -985,7 +1121,6 @@ function buildPreviewHtml() {
             <div ${previewDataAttrs} style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;display:flex;align-items:center;justify-content:${getTextJustifyContent(component.props.textAlign)};padding:14px 18px;line-height:1.5;font-size:${Number(component.props.fontSize) || 32}px;color:${component.props.color || '#1f2937'};font-weight:${component.props.fontWeight || '700'};text-align:${component.props.textAlign || 'left'};background:${component.props.backgroundColor || 'transparent'};">
                 <div style="width:100%;white-space:pre-wrap;word-break:break-word;">
                     <div>${escapeHtml(textState.text)}</div>
-                    ${textState.note ? `<div style="margin-top:8px;font-size:12px;line-height:1.4;opacity:0.78;">${escapeHtml(textState.note)}</div>` : ''}
                 </div>
             </div>
         `;
@@ -1138,12 +1273,22 @@ function bindTopbarActions() {
     refs.runBtn.addEventListener('click', runPreview);
 }
 
+function bindExternalRefresh() {
+    window.addEventListener('focus', renderAll);
+    window.addEventListener('storage', (event) => {
+        if (event.key === 'ia.lowcode.workflow.runtime.v1' || event.key === 'ia.lowcode.projects.v1') {
+            renderAll();
+        }
+    });
+}
+
 function init() {
     renderLibrary();
     initializeProject();
     bindLibraryDragAndDrop();
     bindStageInteractions();
     bindTopbarActions();
+    bindExternalRefresh();
     renderAll();
 }
 

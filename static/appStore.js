@@ -1,7 +1,8 @@
-export const state = {
+﻿export const state = {
     nodes: new Map(),
     nextId: 100,
     workflowPorts: [],
+    workflowVariables: [],
     currentProject: null,
     selectedNodeId: null,
     selectedNodeIds: [],
@@ -33,6 +34,18 @@ export function setWorkflowPorts(ports) {
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('workflow-ports-changed', {
             detail: { ports: state.workflowPorts.map(port => ({ ...port })) }
+        }));
+    }
+}
+
+export function setWorkflowVariables(variables) {
+    state.workflowVariables = Array.isArray(variables)
+        ? variables.map(variable => ({ ...variable }))
+        : [];
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('workflow-variables-changed', {
+            detail: { variables: state.workflowVariables.map(variable => ({ ...variable })) }
         }));
     }
 }

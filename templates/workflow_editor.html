@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -10,14 +10,14 @@
 <div class="app-container">
     <div class="menu-bar">
         <a class="menu-back-btn" href="{{ url_for('home') }}">返回主菜单</a>
-        <div class="title">低代码工作流编辑器</div>
+        <div class="title">智能工作流编辑器</div>
 
         <div class="menu-item has-submenu">
             文件
             <div class="submenu">
                 <div class="submenu-item" id="newProjectBtn">新建项目</div>
                 <div class="submenu-item" id="saveProjectBtn">保存项目</div>
-                <div class="submenu-item" id="loadProjectBtn">加载项目</div>
+                <div class="submenu-item" id="loadProjectBtn">打开项目</div>
             </div>
         </div>
 
@@ -32,6 +32,7 @@
         <div class="menu-item has-submenu">
             项目
             <div class="submenu">
+                <div class="submenu-item" id="manageVariablesBtn">工作流变量</div>
                 <div class="submenu-item" id="managePortsBtn">项目端口</div>
                 <div class="submenu-item" id="exportProjectBtn">导出 JSON</div>
                 <div class="submenu-item" id="importProjectBtn">导入 JSON</div>
@@ -55,15 +56,13 @@
             </div>
         </div>
 
-        <div class="top-right">
-            <div class="project-badge" id="currentProjectBadge">未命名工作流</div>
-        </div>
+        <div class="top-right"></div>
     </div>
 
     <div class="main-layout">
         <div class="components-panel">
             <div class="panel-header">组件库</div>
-            <div class="components-hint">从左侧拖拽节点到画布，完成工作流编排。</div>
+            <div class="components-hint">从左侧拖拽节点到画布，组合你的工作流。</div>
             <div class="components-list" id="componentsLibrary"></div>
         </div>
 
@@ -74,7 +73,7 @@
                 <button class="toolbar-btn" id="zoomToolBtn" data-tool="zoom" title="缩放">缩放</button>
                 <button class="toolbar-btn" id="deleteToolBtn" data-tool="delete" title="删除">删除</button>
                 <button class="toolbar-btn toolbar-action-btn" id="arrangeCanvasBtn" title="整理画布">整理画布</button>
-                <div class="toolbar-tip" id="canvasToolHint">选择一个工具后在画布中操作节点。</div>
+                <div class="toolbar-tip" id="canvasToolHint">选择节点后可以拖动位置，按住 Alt 再拖动画布。</div>
             </div>
             <div class="canvas-area" id="canvasArea">
                 <div class="canvas-viewport" id="canvasViewport">

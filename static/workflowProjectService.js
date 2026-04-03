@@ -1,4 +1,4 @@
-import { state, setCurrentProject, setDebugCurrentNodeId, setWorkflowPorts } from './appStore.js';
+﻿import { state, setCurrentProject, setDebugCurrentNodeId, setWorkflowPorts, setWorkflowVariables } from './appStore.js';
 import { addConsoleLog } from './appUtils.js';
 import { renderCanvas, resetCanvasHistory, setSelectedNode } from './nodeManager.js';
 import { createProjectRecord, getProjectById, listProjectsByType, saveProjectData, touchProject } from './projectRepository.js';
@@ -19,15 +19,57 @@ function buildDefaultWorkflowName() {
     return `智能工作流 ${now.getFullYear()}-${formatDatePart(now.getMonth() + 1)}-${formatDatePart(now.getDate())} ${formatDatePart(now.getHours())}:${formatDatePart(now.getMinutes())}`;
 }
 
-function normalizeWorkflowPort(port, index = 0) {
-    const safeId = String(port?.id || `workflow-port-${Date.now()}-${index}`);
+function buildVariableId(index = 0) {
+    return `workflow-variable-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function buildPortId(index = 0) {
+    return `workflow-port-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+export function normalizeWorkflowVariable(variable, index = 0) {
+    const dataType = variable?.dataType === 'int' ? 'int' : 'string';
+    const defaultValue = dataType === 'int'
+        ? (Number.isFinite(Number(variable?.defaultValue)) ? Number(variable.defaultValue) : 0)
+        : String(variable?.defaultValue ?? '');
+
     return {
-        id: safeId,
+        id: String(variable?.id || buildVariableId(index)),
+        name: String(variable?.name || `变量${index + 1}`),
+        dataType,
+        defaultValue
+    };
+}
+
+export function getWorkflowVariableById(variableId) {
+    if (!variableId) return null;
+    return (state.workflowVariables || []).find(variable => variable.id === String(variableId)) || null;
+}
+
+function getOutputVariableForNodeId(nodeId) {
+    const node = state.nodes.get(Number(nodeId));
+    const variableId = node?.type === 'output' ? node.properties?.variableId : null;
+    return getWorkflowVariableById(variableId);
+}
+
+function derivePortDataType(port) {
+    if (port?.field === 'outputValue') {
+        const variable = getOutputVariableForNodeId(port?.nodeId);
+        if (variable) return variable.dataType;
+    }
+    return port?.dataType === 'int' ? 'int' : 'string';
+}
+
+export function normalizeWorkflowPort(port, index = 0) {
+    const normalized = {
+        id: String(port?.id || buildPortId(index)),
         name: String(port?.name || `端口${index + 1}`),
         dataType: port?.dataType === 'int' ? 'int' : 'string',
         nodeId: Number.isFinite(Number(port?.nodeId)) ? Number(port.nodeId) : null,
         field: typeof port?.field === 'string' ? port.field : ''
     };
+    normalized.dataType = derivePortDataType(normalized);
+    return normalized;
 }
 
 function normalizeWorkflowData(data) {
@@ -36,29 +78,21 @@ function normalizeWorkflowData(data) {
         next_id: Number.isFinite(Number(data?.next_id)) ? Number(data.next_id) : 100,
         workflow_ports: Array.isArray(data?.workflow_ports)
             ? data.workflow_ports.map(normalizeWorkflowPort)
+            : [],
+        workflow_variables: Array.isArray(data?.workflow_variables)
+            ? data.workflow_variables.map(normalizeWorkflowVariable)
             : []
     };
 }
 
 export function getNodePortFieldOptions(nodeType) {
-    if (nodeType === 'loop') {
+    if (nodeType === 'output') {
         return [
-            { field: 'loopBody', label: '循环体端口' },
-            { field: 'nextNodeId', label: '后续端口' }
+            { field: 'outputValue', label: '输出值' }
         ];
     }
 
-    if (nodeType === 'branch') {
-        return [
-            { field: 'trueBody', label: '真分支端口' },
-            { field: 'falseBody', label: '假分支端口' },
-            { field: 'nextNodeId', label: '公共后续端口' }
-        ];
-    }
-
-    return [
-        { field: 'nextNodeId', label: '下一步端口' }
-    ];
+    return [];
 }
 
 export function getNodePortFieldLabel(nodeType, field) {
@@ -72,7 +106,8 @@ export function serializeWorkflowProjectData() {
             properties: { ...(node.properties || {}) }
         })),
         next_id: state.nextId,
-        workflow_ports: (state.workflowPorts || []).map(normalizeWorkflowPort)
+        workflow_ports: (state.workflowPorts || []).map(normalizeWorkflowPort),
+        workflow_variables: (state.workflowVariables || []).map(normalizeWorkflowVariable)
     };
 }
 
@@ -85,6 +120,7 @@ export function applyWorkflowProjectData(data) {
     }
 
     state.nextId = normalized.next_id;
+    setWorkflowVariables(normalized.workflow_variables);
     setWorkflowPorts(normalized.workflow_ports);
     setDebugCurrentNodeId(null);
     resetCanvasHistory();
@@ -231,7 +267,10 @@ export function initializeWorkflowProjectFromEntry() {
         return { source: 'create', project: created };
     }
 
-    return { source: 'demo', project: null };
+    applyWorkflowProjectData({});
+    setCurrentProject(null);
+    syncLastSavedSnapshot();
+    return { source: 'blank', project: null };
 }
 
 export function startWorkflowAutoSave() {
@@ -263,7 +302,7 @@ export function startWorkflowAutoSave() {
 }
 
 export function stopWorkflowAutoSave() {
-    if (autoSaveTimer != null) {
+    if (autoSaveTimer) {
         window.clearInterval(autoSaveTimer);
         autoSaveTimer = null;
     }
