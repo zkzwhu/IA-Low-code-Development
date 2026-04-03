@@ -1,6 +1,8 @@
 export const state = {
     nodes: new Map(),
     nextId: 100,
+    workflowPorts: [],
+    currentProject: null,
     selectedNodeId: null,
     selectedNodeIds: [],
     expandedPropertyNodeIds: [],
@@ -21,6 +23,30 @@ export function setNodes(newNodes) {
 
 export function setNextId(id) {
     state.nextId = id;
+}
+
+export function setWorkflowPorts(ports) {
+    state.workflowPorts = Array.isArray(ports)
+        ? ports.map(port => ({ ...port }))
+        : [];
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('workflow-ports-changed', {
+            detail: { ports: state.workflowPorts.map(port => ({ ...port })) }
+        }));
+    }
+}
+
+export function setCurrentProject(project) {
+    state.currentProject = project && typeof project === 'object'
+        ? { ...project }
+        : null;
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('workflow-project-changed', {
+            detail: { project: state.currentProject ? { ...state.currentProject } : null }
+        }));
+    }
 }
 
 export function setSelectedNodeId(id) {

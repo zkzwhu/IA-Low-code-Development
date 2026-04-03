@@ -5,13 +5,13 @@ import { initFileMenu } from './menuFile.js';
 import { initProjectMenu } from './menuProject.js';
 import { initSettingsMenu } from './menuSettings.js';
 import { initWindowMenu } from './menuWindow.js';
+import { initializeWorkflowProjectFromEntry, startWorkflowAutoSave } from './workflowProjectService.js';
 
 let debugSessionId = null;
 const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch']);
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
-const EDITOR_IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const COMPONENT_LIBRARY = [
     {
         id: 'collection',
@@ -372,6 +372,7 @@ function prepareDebugToolbar() {
     if (!topRight) return;
 
     topRight.innerHTML = `
+        <div class="project-badge" id="currentProjectBadge">未命名工作流</div>
         <button class="run-button" id="runWorkflowBtn" title="运行工作流">运行工作流</button>
         <button class="run-button debug-start-button" id="startDebugBtn" title="进入调试模式">开始调试</button>
         <div class="debug-actions" id="debugActionGroup" style="display:none;">
@@ -661,82 +662,18 @@ async function debugStop() {
     addConsoleLog('调试已手动停止。', 'info', 'debug');
 }
 
-function getEditorQuery() {
-    const params = new URLSearchParams(window.location.search);
-    return {
-        mode: params.get('mode') === 'screen' ? 'screen' : 'workflow',
-        entry: params.get('entry') || ''
-    };
-}
-
-function applyProjectData(data) {
-    state.nodes.clear();
-
-    for (const node of data.nodes || []) {
-        state.nodes.set(node.id, node);
-    }
-
-    state.nextId = Number.isFinite(Number(data.next_id)) ? Number(data.next_id) : 100;
-    setDebugCurrentNodeId(null);
-    resetCanvasHistory();
-    renderCanvas();
-    setSelectedNode(null);
-}
-
-function loadImportedProject() {
-    const rawPayload = sessionStorage.getItem(EDITOR_IMPORT_STORAGE_KEY);
-    if (!rawPayload) return false;
-
-    sessionStorage.removeItem(EDITOR_IMPORT_STORAGE_KEY);
-
-    try {
-        const payload = JSON.parse(rawPayload);
-        const importedData = payload?.data || {};
-
-        if (!Array.isArray(importedData.nodes)) {
-            throw new Error('Invalid imported project');
-        }
-
-        applyProjectData(importedData);
-        addConsoleLog(`已导入 ${payload?.filename || 'JSON 文件'}，可以继续编辑。`, 'info', 'run');
-        return true;
-    } catch (error) {
-        addConsoleLog('导入数据无效，已切换到默认画布。', 'error', 'run');
-        return false;
-    }
-}
-
-function initBlankProject(mode) {
-    applyProjectData({ nodes: [], next_id: 100 });
-    addConsoleLog(
-        mode === 'screen'
-            ? '已创建空白大屏应用项目，当前先复用工作流编辑器进行搭建。'
-            : '已创建空白工作流项目，可以开始拖拽节点。',
-        'info',
-        'run'
-    );
-}
-
 function initializeProjectData() {
-    const { mode, entry } = getEditorQuery();
-
-    if (loadImportedProject()) {
-        if (mode === 'screen') {
-            addConsoleLog('当前通过大屏应用入口进入，暂复用现有工作流编辑界面。', 'info', 'run');
-        }
-        return;
+    const result = initializeWorkflowProjectFromEntry();
+    if (result?.source === 'demo') {
+        initDemoFlow();
     }
+}
 
-    if (entry === 'create') {
-        initBlankProject(mode);
-        return;
-    }
-
-    initDemoFlow();
-
-    if (mode === 'screen') {
-        addConsoleLog('当前通过大屏应用入口进入，暂复用现有工作流编辑界面。', 'info', 'run');
-    }
+function updateCurrentProjectBadge() {
+    const badge = document.getElementById('currentProjectBadge');
+    if (!badge) return;
+    badge.textContent = state.currentProject?.name || '未命名工作流';
+    badge.title = state.currentProject?.name || '未命名工作流';
 }
 
 function initDemoFlow() {
@@ -907,6 +844,9 @@ export function init() {
     setConsoleTab(state.activeConsoleTab);
     updateCanvasToolbarUi();
     renderDebugState(null);
+    updateCurrentProjectBadge();
+    window.addEventListener('workflow-project-changed', updateCurrentProjectBadge);
+    startWorkflowAutoSave();
 }
 
 if (document.readyState === 'loading') {

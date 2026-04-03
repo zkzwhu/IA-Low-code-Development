@@ -141,6 +141,21 @@ body {
     gap: 10px;
     flex-wrap: wrap;
 }
+.project-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #dbe8f4;
+    font-size: 12px;
+    font-weight: 700;
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .run-button {
     background: #27ae60;
     color: white;
@@ -857,6 +872,71 @@ body {
     display: flex;
     flex-direction: column;
     gap: 14px;
+}
+
+.port-editor-list,
+.project-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.port-editor-item,
+.project-picker-item {
+    border: 1px solid #d9e3ea;
+    border-radius: 14px;
+    background: #f9fbfc;
+    padding: 12px;
+}
+
+.port-editor-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.port-editor-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #2c3e50;
+}
+
+.port-editor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.project-picker-btn {
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+}
+
+.project-picker-btn strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 14px;
+    color: #243b53;
+}
+
+.project-picker-btn span {
+    display: block;
+    font-size: 12px;
+    color: #617485;
+}
+
+.port-editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
 }
 
 /* 底部控制台 */

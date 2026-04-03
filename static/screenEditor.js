@@ -1,20 +1,21 @@
+﻿
+import { getProjectById, listProjectsByType } from './projectRepository.js';
+
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
-const DEFAULT_PAGE = {
-    width: 1440,
-    height: 900,
-    background: '#f5f7fb'
-};
+const SOURCE_MODE_MANUAL = 'manual';
+const SOURCE_MODE_WORKFLOW_PORT = 'workflow-port';
+const DEFAULT_PAGE = { width: 1440, height: 900, background: '#f5f7fb' };
 
 const COMPONENT_LIBRARY = [
     {
         type: 'text',
-        title: '文本显示',
-        description: '可编辑文本内容、字号、颜色和尺寸。'
+        title: '文本展示',
+        description: '显示固定文本，或绑定已有工作流中的字符串/整形端口。'
     },
     {
         type: 'image',
         title: '图片展示',
-        description: '上传图片并在大屏中展示。'
+        description: '上传图片，或绑定已有工作流中的字符串端口作为图片地址。'
     }
 ];
 
@@ -60,13 +61,27 @@ function getTextJustifyContent(textAlign) {
 
 function getQuery() {
     const params = new URLSearchParams(window.location.search);
-    return {
-        entry: params.get('entry') || ''
-    };
+    return { entry: params.get('entry') || '' };
 }
 
 function getSelectedComponent() {
     return state.selectedId != null ? state.components.get(state.selectedId) || null : null;
+}
+
+function createDefaultSource() {
+    return {
+        mode: SOURCE_MODE_MANUAL,
+        workflowProjectId: '',
+        workflowPortId: ''
+    };
+}
+
+function normalizeSource(rawSource) {
+    return {
+        mode: rawSource?.mode === SOURCE_MODE_WORKFLOW_PORT ? SOURCE_MODE_WORKFLOW_PORT : SOURCE_MODE_MANUAL,
+        workflowProjectId: typeof rawSource?.workflowProjectId === 'string' ? rawSource.workflowProjectId : '',
+        workflowPortId: typeof rawSource?.workflowPortId === 'string' ? rawSource.workflowPortId : ''
+    };
 }
 
 function createTextComponent(x, y) {
@@ -83,7 +98,8 @@ function createTextComponent(x, y) {
             color: '#1f2937',
             fontWeight: '700',
             textAlign: 'left',
-            backgroundColor: 'transparent'
+            backgroundColor: 'transparent',
+            source: createDefaultSource()
         }
     };
 }
@@ -100,7 +116,8 @@ function createImageComponent(x, y) {
             src: '',
             alt: '图片展示组件',
             objectFit: 'cover',
-            borderRadius: 20
+            borderRadius: 20,
+            source: createDefaultSource()
         }
     };
 }
@@ -114,9 +131,7 @@ function createComponent(type, x, y) {
 function normalizeComponent(rawComponent) {
     const baseId = Number.isFinite(Number(rawComponent?.id)) ? Number(rawComponent.id) : state.nextId++;
     const type = rawComponent?.type === 'image' ? 'image' : 'text';
-    const component = type === 'image'
-        ? createImageComponent(80, 80)
-        : createTextComponent(80, 80);
+    const component = type === 'image' ? createImageComponent(80, 80) : createTextComponent(80, 80);
 
     component.id = baseId;
     component.x = Number.isFinite(Number(rawComponent?.x)) ? Number(rawComponent.x) : component.x;
@@ -125,9 +140,171 @@ function normalizeComponent(rawComponent) {
     component.height = Number.isFinite(Number(rawComponent?.height)) ? Number(rawComponent.height) : component.height;
     component.props = {
         ...component.props,
-        ...(rawComponent?.props || {})
+        ...(rawComponent?.props || {}),
+        source: normalizeSource(rawComponent?.props?.source)
     };
     return component;
+}
+
+function getSupportedPortTypes(componentType) {
+    return componentType === 'image' ? ['string'] : ['string', 'int'];
+}
+
+function getPortTypeLabel(dataType) {
+    return dataType === 'int' ? '整形' : '字符串';
+}
+
+function getWorkflowPortsForProject(projectId) {
+    const project = getProjectById(projectId);
+    if (!project || project.type !== 'workflow') return [];
+
+    return Array.isArray(project.data?.workflow_ports)
+        ? project.data.workflow_ports.map((port, index) => ({
+            id: String(port?.id || `workflow-port-${index}`),
+            name: String(port?.name || `端口${index + 1}`),
+            dataType: port?.dataType === 'int' ? 'int' : 'string'
+        }))
+        : [];
+}
+
+function getCompatibleWorkflowPorts(componentType, projectId) {
+    const supported = new Set(getSupportedPortTypes(componentType));
+    return getWorkflowPortsForProject(projectId).filter(port => supported.has(port.dataType));
+}
+
+function ensureComponentSource(component) {
+    const normalized = normalizeSource(component?.props?.source);
+    component.props.source = normalized;
+    return normalized;
+}
+
+function primeWorkflowSource(component) {
+    const source = ensureComponentSource(component);
+    const projects = listProjectsByType('workflow');
+    if (!projects.length) {
+        source.workflowProjectId = '';
+        source.workflowPortId = '';
+        return source;
+    }
+
+    if (!projects.some(project => project.id === source.workflowProjectId)) {
+        source.workflowProjectId = projects[0].id;
+    }
+
+    const compatiblePorts = getCompatibleWorkflowPorts(component.type, source.workflowProjectId);
+    if (!compatiblePorts.some(port => port.id === source.workflowPortId)) {
+        source.workflowPortId = compatiblePorts[0]?.id || '';
+    }
+
+    return source;
+}
+function resolveWorkflowBinding(component) {
+    const source = normalizeSource(component?.props?.source);
+    if (source.mode !== SOURCE_MODE_WORKFLOW_PORT) {
+        return { mode: SOURCE_MODE_MANUAL, valid: false, source };
+    }
+
+    const project = getProjectById(source.workflowProjectId);
+    if (!project || project.type !== 'workflow') {
+        return { mode: SOURCE_MODE_WORKFLOW_PORT, valid: false, reason: 'missing-project', source };
+    }
+
+    const port = getWorkflowPortsForProject(project.id).find(item => item.id === source.workflowPortId) || null;
+    if (!port) {
+        return { mode: SOURCE_MODE_WORKFLOW_PORT, valid: false, reason: 'missing-port', project, source };
+    }
+
+    if (!getSupportedPortTypes(component.type).includes(port.dataType)) {
+        return { mode: SOURCE_MODE_WORKFLOW_PORT, valid: false, reason: 'unsupported-type', project, port, source };
+    }
+
+    return {
+        mode: SOURCE_MODE_WORKFLOW_PORT,
+        valid: true,
+        project,
+        port,
+        source,
+        label: `${project.name} / ${port.name}`,
+        token: `{{${project.name}.${port.name}}}`
+    };
+}
+
+function getSourceStatusText(component) {
+    const binding = resolveWorkflowBinding(component);
+    if (binding.mode !== SOURCE_MODE_WORKFLOW_PORT) return '当前使用组件内手动填写的内容。';
+    if (binding.valid) {
+        const typeHint = `当前端口类型：${getPortTypeLabel(binding.port.dataType)}。`;
+        if (component.type === 'image') {
+            return `${typeHint} 运行生成网页后，将把该字符串端口值视为图片 URL 或 Base64 地址。`;
+        }
+        return `${typeHint} 文本组件支持字符串与整形端口。`;
+    }
+    if (binding.reason === 'missing-project') return '绑定的工作流项目不存在，请重新选择。';
+    if (binding.reason === 'missing-port') return '绑定的工作流端口不存在，请重新选择。';
+    if (binding.reason === 'unsupported-type') return `当前组件不支持 ${getPortTypeLabel(binding.port?.dataType)} 端口，请重新选择。`;
+    return '请先选择一个有效的工作流端口。';
+}
+
+function getTextRenderState(component) {
+    const binding = resolveWorkflowBinding(component);
+    if (binding.valid) {
+        return {
+            text: binding.token,
+            note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
+        };
+    }
+
+    if (binding.mode === SOURCE_MODE_WORKFLOW_PORT) {
+        return {
+            text: '请选择可用的工作流端口',
+            note: '仅支持字符串 / 整形端口'
+        };
+    }
+
+    return { text: component.props.text || '', note: '' };
+}
+
+function getImageRenderState(component) {
+    const binding = resolveWorkflowBinding(component);
+    if (binding.valid) {
+        return {
+            kind: 'binding',
+            title: '已绑定工作流图片源',
+            note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
+        };
+    }
+
+    if (binding.mode === SOURCE_MODE_WORKFLOW_PORT) {
+        return {
+            kind: 'binding',
+            title: '请选择字符串端口',
+            note: '图片组件仅支持字符串端口作为图片地址'
+        };
+    }
+
+    if (component.props.src) {
+        return { kind: 'image', src: component.props.src };
+    }
+
+    return {
+        kind: 'placeholder',
+        title: '上传图片',
+        note: '或切换为工作流端口作为图片源'
+    };
+}
+
+function getPreviewDataAttributes(component) {
+    const binding = resolveWorkflowBinding(component);
+    if (!binding.valid) return '';
+
+    return [
+        `data-source-mode="${SOURCE_MODE_WORKFLOW_PORT}"`,
+        `data-workflow-project-id="${escapeHtml(binding.project.id)}"`,
+        `data-workflow-project-name="${escapeHtml(binding.project.name)}"`,
+        `data-workflow-port-id="${escapeHtml(binding.port.id)}"`,
+        `data-workflow-port-name="${escapeHtml(binding.port.name)}"`,
+        `data-workflow-port-type="${escapeHtml(binding.port.dataType)}"`
+    ].join(' ');
 }
 
 function loadScreenData(data) {
@@ -171,7 +348,10 @@ function exportScreenData() {
             y: component.y,
             width: component.width,
             height: component.height,
-            props: { ...component.props }
+            props: {
+                ...component.props,
+                source: normalizeSource(component.props.source)
+            }
         })),
         next_id: state.nextId
     };
@@ -216,7 +396,6 @@ function renderLibrary() {
         </article>
     `).join('');
 }
-
 function renderStage() {
     updateStageAppearance();
 
@@ -229,9 +408,17 @@ function renderStage() {
         ].join(';');
 
         if (component.type === 'image') {
-            const imageHtml = component.props.src
+            const imageState = getImageRenderState(component);
+            const imageHtml = imageState.kind === 'image'
                 ? `<img class="image-fill" src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}" style="object-fit:${escapeHtml(component.props.objectFit || 'cover')}; border-radius:${Number(component.props.borderRadius) || 0}px;">`
-                : '<div class="image-placeholder">点击右侧属性面板上传图片</div>';
+                : `
+                    <div class="image-placeholder">
+                        <div>
+                            <div class="image-placeholder-title">${escapeHtml(imageState.title)}</div>
+                            <div class="image-placeholder-note">${escapeHtml(imageState.note || '')}</div>
+                        </div>
+                    </div>
+                `;
 
             return `
                 <div class="screen-component image-component ${state.selectedId === component.id ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle}">
@@ -240,6 +427,7 @@ function renderStage() {
             `;
         }
 
+        const textState = getTextRenderState(component);
         const textStyle = [
             `font-size:${Number(component.props.fontSize) || 32}px`,
             `color:${component.props.color || '#1f2937'}`,
@@ -251,7 +439,10 @@ function renderStage() {
 
         return `
             <div class="screen-component text-component ${state.selectedId === component.id ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${textStyle}">
-                <div class="text-component-content">${escapeHtml(component.props.text || '')}</div>
+                <div class="text-component-content">
+                    <div class="text-main-content">${escapeHtml(textState.text)}</div>
+                    ${textState.note ? `<div class="text-source-note">${escapeHtml(textState.note)}</div>` : ''}
+                </div>
             </div>
         `;
     }).join('');
@@ -259,6 +450,145 @@ function renderStage() {
     refs.stage.innerHTML = markup;
 }
 
+function renderSourceSection(component) {
+    const source = normalizeSource(component.props.source);
+    const workflowProjects = listProjectsByType('workflow');
+    const compatiblePorts = source.workflowProjectId
+        ? getCompatibleWorkflowPorts(component.type, source.workflowProjectId)
+        : [];
+    const binding = resolveWorkflowBinding(component);
+    const supportedTypesLabel = getSupportedPortTypes(component.type).map(getPortTypeLabel).join(' / ');
+
+    return `
+        <section class="prop-section">
+            <h3>数据源</h3>
+            <div>
+                <label class="prop-label" for="sourceModeInput">来源类型</label>
+                <select class="prop-select" id="sourceModeInput">
+                    <option value="${SOURCE_MODE_MANUAL}" ${source.mode === SOURCE_MODE_MANUAL ? 'selected' : ''}>手动输入</option>
+                    <option value="${SOURCE_MODE_WORKFLOW_PORT}" ${source.mode === SOURCE_MODE_WORKFLOW_PORT ? 'selected' : ''}>工作流端口</option>
+                </select>
+            </div>
+            ${source.mode === SOURCE_MODE_WORKFLOW_PORT ? `
+                <div class="prop-grid">
+                    <div>
+                        <label class="prop-label" for="sourceWorkflowProjectInput">工作流项目</label>
+                        <select class="prop-select" id="sourceWorkflowProjectInput" ${workflowProjects.length ? '' : 'disabled'}>
+                            ${workflowProjects.length
+                                ? workflowProjects.map(project => `<option value="${project.id}" ${project.id === source.workflowProjectId ? 'selected' : ''}>${escapeHtml(project.name)}</option>`).join('')
+                                : '<option value="">暂无已保存工作流</option>'}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="prop-label" for="sourceWorkflowPortInput">项目端口</label>
+                        <select class="prop-select" id="sourceWorkflowPortInput" ${(compatiblePorts.length && workflowProjects.length) ? '' : 'disabled'}>
+                            ${compatiblePorts.length
+                                ? compatiblePorts.map(port => `<option value="${port.id}" ${port.id === source.workflowPortId ? 'selected' : ''}>${escapeHtml(port.name)} · ${getPortTypeLabel(port.dataType)}</option>`).join('')
+                                : '<option value="">暂无可用端口</option>'}
+                        </select>
+                    </div>
+                </div>
+                <p class="prop-hint">${escapeHtml(getSourceStatusText(component))}</p>
+                <div class="source-summary">
+                    <span class="source-summary-label">支持类型</span>
+                    <span>${escapeHtml(supportedTypesLabel)}</span>
+                    ${binding.valid ? `<span class="source-summary-chip">${escapeHtml(binding.label)}</span>` : ''}
+                </div>
+            ` : `
+                <p class="prop-hint">当前使用组件内手动填写的内容，切换到工作流端口后可直接绑定已有工作流项目端口。</p>
+            `}
+        </section>
+    `;
+}
+
+function renderTextSettings(component) {
+    const source = normalizeSource(component.props.source);
+    const textState = getTextRenderState(component);
+
+    return `
+        <section class="prop-section">
+            <h3>文本设置</h3>
+            ${source.mode === SOURCE_MODE_MANUAL ? `
+                <div>
+                    <label class="prop-label" for="textValueInput">显示文本</label>
+                    <textarea class="prop-textarea" id="textValueInput">${escapeHtml(component.props.text || '')}</textarea>
+                </div>
+            ` : `
+                <div>
+                    <label class="prop-label">绑定预览</label>
+                    <div class="source-preview-box">${escapeHtml(textState.text)}</div>
+                </div>
+            `}
+            <div class="prop-grid">
+                <div>
+                    <label class="prop-label" for="textFontSizeInput">字号</label>
+                    <input class="prop-input" id="textFontSizeInput" type="number" min="12" max="160" value="${Number(component.props.fontSize) || 32}">
+                </div>
+                <div>
+                    <label class="prop-label" for="textFontWeightInput">字重</label>
+                    <select class="prop-select" id="textFontWeightInput">
+                        <option value="400" ${String(component.props.fontWeight) === '400' ? 'selected' : ''}>常规</option>
+                        <option value="600" ${String(component.props.fontWeight) === '600' ? 'selected' : ''}>中等</option>
+                        <option value="700" ${String(component.props.fontWeight) === '700' ? 'selected' : ''}>加粗</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="prop-label" for="textColorInput">文字颜色</label>
+                    <input class="prop-input" id="textColorInput" type="color" value="${component.props.color || '#1f2937'}">
+                </div>
+                <div>
+                    <label class="prop-label" for="textAlignInput">对齐方式</label>
+                    <select class="prop-select" id="textAlignInput">
+                        <option value="left" ${component.props.textAlign === 'left' ? 'selected' : ''}>左对齐</option>
+                        <option value="center" ${component.props.textAlign === 'center' ? 'selected' : ''}>居中</option>
+                        <option value="right" ${component.props.textAlign === 'right' ? 'selected' : ''}>右对齐</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="prop-label" for="textBackgroundInput">背景颜色</label>
+                <input class="prop-input" id="textBackgroundInput" type="color" value="${normalizeColorValue(component.props.backgroundColor)}">
+            </div>
+        </section>
+    `;
+}
+
+function renderImageSettings(component) {
+    const source = normalizeSource(component.props.source);
+
+    return `
+        <section class="prop-section">
+            <h3>图片设置</h3>
+            ${source.mode === SOURCE_MODE_MANUAL ? `
+                <div>
+                    <label class="prop-label" for="imageUploadInput">上传图片</label>
+                    <input class="prop-input" id="imageUploadInput" type="file" accept="image/*">
+                </div>
+            ` : `
+                <p class="prop-hint">当前图片来自工作流端口，端口值会在运行生成网页时作为图片 URL 或 Base64 地址使用。</p>
+            `}
+            <div>
+                <label class="prop-label" for="imageAltInput">图片说明</label>
+                <input class="prop-input" id="imageAltInput" type="text" value="${escapeHtml(component.props.alt || '')}">
+            </div>
+            <div class="prop-grid">
+                <div>
+                    <label class="prop-label" for="imageFitInput">填充方式</label>
+                    <select class="prop-select" id="imageFitInput">
+                        <option value="cover" ${component.props.objectFit === 'cover' ? 'selected' : ''}>cover</option>
+                        <option value="contain" ${component.props.objectFit === 'contain' ? 'selected' : ''}>contain</option>
+                        <option value="fill" ${component.props.objectFit === 'fill' ? 'selected' : ''}>fill</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="prop-label" for="imageRadiusInput">圆角</label>
+                    <input class="prop-input" id="imageRadiusInput" type="number" min="0" max="80" value="${Number(component.props.borderRadius) || 0}">
+                </div>
+            </div>
+            ${source.mode === SOURCE_MODE_MANUAL && component.props.src ? `<img class="preview-thumb" src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}">` : ''}
+        </section>
+    `;
+}
 function renderProperties() {
     const component = getSelectedComponent();
 
@@ -266,7 +596,7 @@ function renderProperties() {
         refs.propContent.innerHTML = `
             <section class="prop-section">
                 <h3>页面设置</h3>
-                <p class="prop-hint">未选中组件时，可以直接配置大屏页面尺寸和背景色。</p>
+                <p class="prop-hint">未选中组件时，可以直接配置大屏页面尺寸与背景颜色。</p>
                 <div class="prop-grid">
                     <div>
                         <label class="prop-label" for="pageWidthInput">画布宽度</label>
@@ -284,15 +614,14 @@ function renderProperties() {
             </section>
             <section class="prop-section">
                 <h3>使用方式</h3>
-                <p class="prop-hint">从左侧拖拽组件到画布中。文本组件支持直接编辑文字，图片组件支持上传图片。点击右上角“运行生成网页”会在新标签页中打开实际网页。</p>
+                <p class="prop-hint">从左侧拖拽组件到画布中。文本组件可绑定字符串/整形工作流端口，图片组件可绑定字符串工作流端口。点击右上角“运行生成网页”会在新标签页中打开网页预览。</p>
             </section>
         `;
-
         bindPagePropertyInputs();
         return;
     }
 
-    const commonSection = `
+    refs.propContent.innerHTML = `
         <section class="prop-section">
             <h3>位置与尺寸</h3>
             <div class="prop-grid">
@@ -314,83 +643,8 @@ function renderProperties() {
                 </div>
             </div>
         </section>
-    `;
-
-    let typeSection = '';
-    if (component.type === 'text') {
-        typeSection = `
-            <section class="prop-section">
-                <h3>文本设置</h3>
-                <div>
-                    <label class="prop-label" for="textValueInput">显示文本</label>
-                    <textarea class="prop-textarea" id="textValueInput">${escapeHtml(component.props.text || '')}</textarea>
-                </div>
-                <div class="prop-grid">
-                    <div>
-                        <label class="prop-label" for="textFontSizeInput">字号</label>
-                        <input class="prop-input" id="textFontSizeInput" type="number" min="12" max="160" value="${Number(component.props.fontSize) || 32}">
-                    </div>
-                    <div>
-                        <label class="prop-label" for="textFontWeightInput">字重</label>
-                        <select class="prop-select" id="textFontWeightInput">
-                            <option value="400" ${String(component.props.fontWeight) === '400' ? 'selected' : ''}>常规</option>
-                            <option value="600" ${String(component.props.fontWeight) === '600' ? 'selected' : ''}>中等</option>
-                            <option value="700" ${String(component.props.fontWeight) === '700' ? 'selected' : ''}>加粗</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="prop-label" for="textColorInput">文字颜色</label>
-                        <input class="prop-input" id="textColorInput" type="color" value="${component.props.color || '#1f2937'}">
-                    </div>
-                    <div>
-                        <label class="prop-label" for="textAlignInput">对齐方式</label>
-                        <select class="prop-select" id="textAlignInput">
-                            <option value="left" ${component.props.textAlign === 'left' ? 'selected' : ''}>左对齐</option>
-                            <option value="center" ${component.props.textAlign === 'center' ? 'selected' : ''}>居中</option>
-                            <option value="right" ${component.props.textAlign === 'right' ? 'selected' : ''}>右对齐</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label class="prop-label" for="textBackgroundInput">背景颜色</label>
-                    <input class="prop-input" id="textBackgroundInput" type="color" value="${normalizeColorValue(component.props.backgroundColor)}">
-                </div>
-            </section>
-        `;
-    } else {
-        typeSection = `
-            <section class="prop-section">
-                <h3>图片设置</h3>
-                <div>
-                    <label class="prop-label" for="imageUploadInput">上传图片</label>
-                    <input class="prop-input" id="imageUploadInput" type="file" accept="image/*">
-                </div>
-                <div>
-                    <label class="prop-label" for="imageAltInput">图片说明</label>
-                    <input class="prop-input" id="imageAltInput" type="text" value="${escapeHtml(component.props.alt || '')}">
-                </div>
-                <div class="prop-grid">
-                    <div>
-                        <label class="prop-label" for="imageFitInput">填充方式</label>
-                        <select class="prop-select" id="imageFitInput">
-                            <option value="cover" ${component.props.objectFit === 'cover' ? 'selected' : ''}>cover</option>
-                            <option value="contain" ${component.props.objectFit === 'contain' ? 'selected' : ''}>contain</option>
-                            <option value="fill" ${component.props.objectFit === 'fill' ? 'selected' : ''}>fill</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="prop-label" for="imageRadiusInput">圆角</label>
-                        <input class="prop-input" id="imageRadiusInput" type="number" min="0" max="80" value="${Number(component.props.borderRadius) || 0}">
-                    </div>
-                </div>
-                ${component.props.src ? `<img class="preview-thumb" src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}">` : ''}
-            </section>
-        `;
-    }
-
-    refs.propContent.innerHTML = `
-        ${commonSection}
-        ${typeSection}
+        ${renderSourceSection(component)}
+        ${component.type === 'text' ? renderTextSettings(component) : renderImageSettings(component)}
         <section class="prop-section">
             <h3>组件操作</h3>
             <button class="danger-btn" id="deleteComponentBtn" type="button">删除当前组件</button>
@@ -455,6 +709,37 @@ function bindComponentPropertyInputs(component) {
     const deleteBtn = document.getElementById('deleteComponentBtn');
     if (deleteBtn) {
         deleteBtn.addEventListener('click', removeSelectedComponent);
+    }
+
+    const source = ensureComponentSource(component);
+    const sourceModeInput = document.getElementById('sourceModeInput');
+    const projectInput = document.getElementById('sourceWorkflowProjectInput');
+    const portInput = document.getElementById('sourceWorkflowPortInput');
+
+    if (sourceModeInput) {
+        sourceModeInput.addEventListener('change', () => {
+            source.mode = sourceModeInput.value === SOURCE_MODE_WORKFLOW_PORT ? SOURCE_MODE_WORKFLOW_PORT : SOURCE_MODE_MANUAL;
+            if (source.mode === SOURCE_MODE_WORKFLOW_PORT) {
+                primeWorkflowSource(component);
+            }
+            renderAll();
+        });
+    }
+
+    if (projectInput) {
+        projectInput.addEventListener('change', () => {
+            source.workflowProjectId = projectInput.value;
+            source.workflowPortId = '';
+            primeWorkflowSource(component);
+            renderAll();
+        });
+    }
+
+    if (portInput) {
+        portInput.addEventListener('change', () => {
+            source.workflowPortId = portInput.value;
+            renderAll();
+        });
     }
 
     if (component.type === 'text') {
@@ -560,7 +845,6 @@ function getPointInStage(clientX, clientY) {
 function setCanvasPanActive(active) {
     refs.canvasArea.classList.toggle('panning', active);
 }
-
 function bindLibraryDragAndDrop() {
     refs.library.addEventListener('dragstart', (event) => {
         const card = event.target.closest('[data-component-type]');
@@ -675,20 +959,34 @@ function bindStageInteractions() {
 function buildPreviewHtml() {
     const componentHtml = Array.from(state.components.values()).map(component => {
         if (component.type === 'image') {
-            const imageContent = component.props.src
+            const imageState = getImageRenderState(component);
+            const previewDataAttrs = getPreviewDataAttributes(component);
+            const imageContent = imageState.kind === 'image'
                 ? `<img src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}" style="width:100%;height:100%;object-fit:${escapeHtml(component.props.objectFit || 'cover')};border-radius:${Number(component.props.borderRadius) || 0}px;">`
-                : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#e8eef3;color:#66788a;font:16px/1.6 Segoe UI,sans-serif;">未上传图片</div>';
+                : `
+                    <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:18px;background:linear-gradient(145deg,#edf4f8 0%,#e4edf4 100%);color:#66788a;text-align:center;font:16px/1.6 Segoe UI,sans-serif;">
+                        <div>
+                            <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(imageState.title)}</div>
+                            <div style="font-size:12px;opacity:0.9;">${escapeHtml(imageState.note || '')}</div>
+                        </div>
+                    </div>
+                `;
 
             return `
-                <div style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;">
+                <div ${previewDataAttrs} style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;">
                     ${imageContent}
                 </div>
             `;
         }
 
+        const textState = getTextRenderState(component);
+        const previewDataAttrs = getPreviewDataAttributes(component);
         return `
-            <div style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;display:flex;align-items:center;justify-content:${getTextJustifyContent(component.props.textAlign)};padding:14px 18px;line-height:1.5;font-size:${Number(component.props.fontSize) || 32}px;color:${component.props.color || '#1f2937'};font-weight:${component.props.fontWeight || '700'};text-align:${component.props.textAlign || 'left'};background:${component.props.backgroundColor || 'transparent'};white-space:pre-wrap;">
-                <div style="width:100%;">${escapeHtml(component.props.text || '')}</div>
+            <div ${previewDataAttrs} style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;display:flex;align-items:center;justify-content:${getTextJustifyContent(component.props.textAlign)};padding:14px 18px;line-height:1.5;font-size:${Number(component.props.fontSize) || 32}px;color:${component.props.color || '#1f2937'};font-weight:${component.props.fontWeight || '700'};text-align:${component.props.textAlign || 'left'};background:${component.props.backgroundColor || 'transparent'};">
+                <div style="width:100%;white-space:pre-wrap;word-break:break-word;">
+                    <div>${escapeHtml(textState.text)}</div>
+                    ${textState.note ? `<div style="margin-top:8px;font-size:12px;line-height:1.4;opacity:0.78;">${escapeHtml(textState.note)}</div>` : ''}
+                </div>
             </div>
         `;
     }).join('');
@@ -751,7 +1049,6 @@ async function importFromFile(file) {
     loadScreenData(data);
     renderAll();
 }
-
 function loadImportedProjectFromSession() {
     const payloadText = sessionStorage.getItem(IMPORT_STORAGE_KEY);
     if (!payloadText) return false;
@@ -786,8 +1083,8 @@ function seedDemoProject() {
 
     const subtitle = createTextComponent(92, 180);
     subtitle.width = 540;
-    subtitle.height = 90;
-    subtitle.props.text = '从左侧拖入组件，编辑属性后点击右上角运行生成网页。';
+    subtitle.height = 96;
+    subtitle.props.text = '从左侧拖入组件，编辑属性后点击右上角运行生成网页。也可以将组件绑定到已有工作流端口。';
     subtitle.props.fontSize = 24;
     subtitle.props.fontWeight = '600';
     subtitle.props.color = '#486070';
