@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
@@ -21,6 +22,33 @@ current_workflow = {
 }
 
 debug_sessions: dict[str, dict[str, Any]] = {}
+
+smart_agriculture_mock_data = {
+    'system': {
+        'title': '系统运行态势',
+        'onlineDevices': '128 台',
+        'todayData': '82.4 MB',
+        'runTime': '36天 12小时',
+        'footer': '边缘网关、采集终端与云端连接正常'
+    },
+    'environment': {
+        'title': '环境监测',
+        'temperature': '24.6 °C',
+        'humidity': '68 %',
+        'pm25': '21 ug/m3',
+        'light': '18500 Lux',
+        'updatedAt': ''
+    },
+    'communication': {
+        'title': '实时通讯',
+        'mqttStatus': '在线',
+        'dataIntegrity': '99.6%',
+        'messageRate': '248 条/分',
+        'latency': '86 ms',
+        'lastSync': '',
+        'broker': 'tcp://127.0.0.1:1883'
+    }
+}
 
 
 def safe_int(value: Any, default: int = 0) -> int:
@@ -70,6 +98,30 @@ def resolve_variable_value(variable_id: str | None, variable_values: dict[str, A
     return '' if value is None else str(value)
 
 
+def current_time_text() -> str:
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def build_smart_agriculture_payload() -> dict[str, dict[str, Any]]:
+    system_data = {
+        **smart_agriculture_mock_data['system'],
+    }
+    environment_data = {
+        **smart_agriculture_mock_data['environment'],
+        'updatedAt': smart_agriculture_mock_data['environment'].get('updatedAt') or current_time_text(),
+    }
+    communication_data = {
+        **smart_agriculture_mock_data['communication'],
+        'lastSync': smart_agriculture_mock_data['communication'].get('lastSync') or current_time_text(),
+    }
+
+    return {
+        'system': system_data,
+        'environment': environment_data,
+        'communication': communication_data,
+    }
+
+
 @app.route('/')
 def home():
     return render_template('home.html')
@@ -83,6 +135,43 @@ def workflow_editor():
 @app.route('/screen-editor')
 def screen_editor():
     return render_template('screen_editor.html')
+
+
+@app.route('/api/agriculture/dashboard', methods=['GET'])
+def get_agriculture_dashboard():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()})
+
+
+@app.route('/api/agriculture/system', methods=['GET'])
+def get_agriculture_system():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['system']})
+
+
+@app.route('/api/agriculture/environment', methods=['GET'])
+def get_agriculture_environment():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['environment']})
+
+
+@app.route('/api/agriculture/communication', methods=['GET'])
+def get_agriculture_communication():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['communication']})
+
+
+@app.route('/api/agriculture/mock/update', methods=['POST'])
+def update_agriculture_mock():
+    payload = request.get_json() or {}
+    section = str(payload.get('section') or '').strip()
+    data = payload.get('data') or {}
+
+    if section not in smart_agriculture_mock_data:
+        return jsonify({'status': 'error', 'message': 'invalid section'}), 400
+    if not isinstance(data, dict):
+        return jsonify({'status': 'error', 'message': 'data must be an object'}), 400
+
+    for key, value in data.items():
+        smart_agriculture_mock_data[section][str(key)] = '' if value is None else str(value)
+
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()[section]})
 
 
 @app.route('/api/workflow/save', methods=['POST'])
