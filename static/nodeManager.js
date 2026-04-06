@@ -1,4 +1,4 @@
-﻿import { state, setExpandedPropertyNodeIds, setNextId, setNodes, setSelectedNodeIds } from './appStore.js';
+import { state, setExpandedPropertyNodeIds, setNextId, setNodes, setSelectedNodeIds } from './appStore.js';
 import { addConsoleLog, escapeHtml } from './appUtils.js';
 
 const NODE_W = 180;
@@ -25,6 +25,8 @@ function typeLabel(type) {
         case 'sequence': return "顺序";
         case 'loop': return "循环";
         case 'branch': return "分支";
+        case 'get_sensor_info': return "获取传感器信息";
+        case 'db_query': return "数据库查询";
         case 'output': return "输出端口";
         default: return type;
     }
@@ -37,6 +39,8 @@ function nodeTypeIcon(type) {
         case 'sequence': return '➡️';
         case 'loop': return '🔁';
         case 'branch': return '🔀';
+        case 'get_sensor_info': return '🌡️';
+        case 'db_query': return '🗄️';
         case 'output': return '📤';
         default: return '◻';
     }
@@ -641,6 +645,28 @@ export function createNode(type, x, y) {
                 breakpoint: false
             };
             break;
+        case 'get_sensor_info':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                source: 'list_sensors',
+                deviceId: '',
+                limit: 5,
+                targetVariableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
+            break;
+        case 'db_query':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                sql: 'SELECT device_id, temperature, humidity, timestamp FROM sensor_data ORDER BY timestamp DESC LIMIT 10',
+                targetVariableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
+            break;
         default: break;
     }
     return baseNode;
@@ -1081,6 +1107,33 @@ function renderNodePropertyEditor(node, options = {}) {
         html += `<div class="help-text">该节点会把选中的变量暴露给项目端口，供大屏应用调用。</div>`;
         html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'get_sensor_info') {
+        const source = props.source === 'latest_data' ? 'latest_data' : 'list_sensors';
+        html += `<div class="prop-group"><label class="prop-label">数据来源</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="source">
+                <option value="list_sensors" ${source === 'list_sensors' ? 'selected' : ''}>设备列表</option>
+                <option value="latest_data" ${source === 'latest_data' ? 'selected' : ''}>设备最近数据</option>
+            </select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">设备 ID（可选）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="deviceId" value="${escapeHtml(props.deviceId || '')}" placeholder="留空时使用默认设备"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">读取条数</label>
+            <input class="prop-input" type="number" min="1" max="100" data-node-id="${node.id}" data-field="limit" value="${props.limit ?? 5}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">写入变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">读取结果会写入变量。字符串变量保存 JSON 文本；整型变量保存记录条数。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'db_query') {
+        html += `<div class="prop-group"><label class="prop-label">SQL（仅 SELECT）</label>
+            <textarea class="prop-input" data-node-id="${node.id}" data-field="sql" rows="4" placeholder="SELECT * FROM sensor_data LIMIT 10">${escapeHtml(props.sql || '')}</textarea></div>`;
+        html += `<div class="prop-group"><label class="prop-label">写入变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">查询结果会写入变量。字符串变量保存 JSON 文本；整型变量保存记录条数。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     }
 
     if (!options.collapsible) return html;
@@ -1149,9 +1202,9 @@ function renderPropertiesPanel() {
             const beforeSnapshot = snapshotCanvasState();
 
             let val = el.value;
-            if (field === "loopCount") val = parseInt(val, 10) || 1;
+            if (field === "loopCount" || field === "limit") val = parseInt(val, 10) || 1;
             if (field === "branchCondition") val = (val === "true");
-            if (field === "variableId") val = val === "" ? null : val;
+            if (field === "variableId" || field === "targetVariableId") val = val === "" ? null : val;
             if (field === "name") {
                 const r = ensureUniqueNameWithinType(node.type, val, node.id);
                 if (!r.ok) {
@@ -1667,6 +1720,15 @@ export function renderCanvas() {
             bodyPreview = `Branch: ${node.properties.branchCondition ? "True" : "False"}<br/>True: ${tCnt} / False: ${fCnt}`;
         }
         else if(node.type === 'start') bodyPreview = "入口节点";
+        else if(node.type === 'get_sensor_info') {
+            const variable = getWorkflowVariableById(node.properties?.targetVariableId);
+            const source = node.properties?.source === 'latest_data' ? '最近数据' : '设备列表';
+            bodyPreview = `${source}<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
+        else if(node.type === 'db_query') {
+            const variable = getWorkflowVariableById(node.properties?.targetVariableId);
+            bodyPreview = `SQL查询<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
         else if(node.type === 'output') {
             const variable = getWorkflowVariableById(node.properties?.variableId);
             bodyPreview = `输出变量: ${escapeHtml(variable?.name || "未选择变量")}`;
@@ -1699,7 +1761,7 @@ export function renderCanvas() {
 
         // 端口
         let connectPointsHtml = '';
-        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output') {
+        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query') {
             connectPointsHtml = `<div class="connect-point" data-id="${node.id}" data-field="nextNodeId" style="${portStyle('nextNodeId', 50)} --cp-color:#3498db; --cp-hover-color:#2c7da0;" title="端口：下一步（next）【Shift+拖动可移动端口】"></div>`;
         } else if (node.type === 'loop') {
             connectPointsHtml = `

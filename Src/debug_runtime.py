@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+import json
+
+from database import SensorDatabase
+
+sensor_db = SensorDatabase()
 
 
 def find_start(nodes_data: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -58,6 +63,36 @@ def resolve_variable_value(variable_id: str | None, variable_values: dict[str, A
     if variable['dataType'] == 'int':
         return safe_int(value, safe_int(variable['defaultValue'], 0, None), None)
     return '' if value is None else str(value)
+
+
+def assign_variable_value(variable_id: str | None, raw_value: Any, variable_values: dict[str, Any], variable_defs_by_id: dict[str, dict[str, Any]]) -> tuple[bool, Any]:
+    variable = variable_defs_by_id.get(str(variable_id)) if variable_id else None
+    if not variable:
+        return False, raw_value
+    if variable.get('dataType') == 'int':
+        converted = safe_int(raw_value, safe_int(variable.get('defaultValue'), 0, None), None)
+        variable_values[variable['id']] = converted
+        return True, converted
+    if isinstance(raw_value, (dict, list)):
+        converted = json.dumps(raw_value, ensure_ascii=False)
+    else:
+        converted = '' if raw_value is None else str(raw_value)
+    variable_values[variable['id']] = converted
+    return True, converted
+
+
+def run_readonly_query(sql: str) -> list[dict[str, Any]]:
+    normalized = str(sql or '').strip()
+    lowered = normalized.lower()
+    if not lowered.startswith('select '):
+        raise ValueError('仅支持 SELECT 查询')
+    if ';' in normalized:
+        raise ValueError('SQL 中不允许使用分号')
+    conn = sensor_db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(normalized)
+    rows = cursor.fetchall()
+    return [dict(row) for row in rows]
 
 
 def create_session(payload: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
@@ -132,6 +167,16 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
     elif node_type == 'output':
         variable = variables_by_id.get(str(props.get('variableId')))
         lines.append(f"variable = {variable.get('name') if variable else 'unknown'}")
+    elif node_type == 'get_sensor_info':
+        lines.append(f"source = {props.get('source', 'list_sensors')}")
+        lines.append(f"deviceId = {props.get('deviceId', '')!r}")
+        lines.append(f"limit = {safe_int(props.get('limit', 5))}")
+        variable = variables_by_id.get(str(props.get('targetVariableId')))
+        lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
+    elif node_type == 'db_query':
+        lines.append(f"sql = {props.get('sql', '')!r}")
+        variable = variables_by_id.get(str(props.get('targetVariableId')))
+        lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
 
     if props.get('nextNodeId') is not None:
         lines.append(f"nextNodeId = {props.get('nextNodeId')}")
@@ -280,6 +325,42 @@ def step_once(session: dict[str, Any]) -> tuple[list[str], bool]:
         value = resolve_variable_value(props.get('variableId'), variable_values, variables_by_id)
         session.setdefault('outputs', {})[str(node.get('id'))] = value
         logs.append(f"输出端口: {(variable or {}).get('name', '未绑定变量')} = {value}")
+        logs.extend(_goto(session, props.get('nextNodeId')))
+    elif node_type == 'get_sensor_info':
+        source = props.get('source', 'list_sensors')
+        limit = max(1, min(safe_int(props.get('limit', 5)), 100))
+        device_id = str(props.get('deviceId') or '').strip() or 'SmartAgriculture_thermometer'
+        payload: Any = []
+        try:
+            if source == 'latest_data':
+                payload = sensor_db.get_latest_sensor_data(device_id, limit)
+                logs.append(f"读取传感器最近数据: device={device_id}, rows={len(payload)}")
+            else:
+                payload = sensor_db.list_sensors()
+                logs.append(f"读取传感器设备列表: rows={len(payload)}")
+        except Exception as exc:
+            payload = []
+            logs.append(f"读取传感器信息失败: {exc}")
+        written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variables_by_id)
+        if written:
+            logs.append(f"写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+        else:
+            logs.append('未写入变量：未绑定 targetVariableId')
+        logs.extend(_goto(session, props.get('nextNodeId')))
+    elif node_type == 'db_query':
+        sql = str(props.get('sql') or '').strip()
+        payload: Any = []
+        try:
+            payload = run_readonly_query(sql)
+            logs.append(f"数据库查询成功: rows={len(payload)}")
+        except Exception as exc:
+            payload = []
+            logs.append(f"数据库查询失败: {exc}")
+        written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variables_by_id)
+        if written:
+            logs.append(f"写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+        else:
+            logs.append('未写入变量：未绑定 targetVariableId')
         logs.extend(_goto(session, props.get('nextNodeId')))
     elif node_type == 'loop':
         body_ids = props.get('bodyNodeIds', []) or []

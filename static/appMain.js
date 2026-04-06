@@ -1,4 +1,4 @@
-﻿import { state, setActiveCanvasTool, setActiveConsoleTab, setCanvasZoom, setDebugCurrentNodeId } from './appStore.js';
+import { state, setActiveCanvasTool, setActiveConsoleTab, setCanvasZoom, setDebugCurrentNodeId } from './appStore.js';
 import { addConsoleLog, clearConsole, displayLogs, showModal } from './appUtils.js';
 import { autoArrangeNodes, canUndoCanvasChange, captureCanvasHistorySnapshot, commitCanvasHistorySnapshot, copySelectedNodes, createNode, cutSelectedNodes, deleteSelectedNodes, pasteClipboardNodes, placeNodeWithoutOverlapById, renderCanvas, undoCanvasChange } from './nodeManager.js';
 import { initFileMenu } from './menuFile.js';
@@ -9,7 +9,7 @@ import { saveWorkflowRuntime } from './workflowRuntimeStore.js';
 import { initializeWorkflowProjectFromEntry, startWorkflowAutoSave } from './workflowProjectService.js';
 
 let debugSessionId = null;
-const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output']);
+const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output', 'get_sensor_info', 'db_query']);
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
@@ -44,6 +44,8 @@ const COMPONENT_LIBRARY = [
         icon: '📦',
         expanded: true,
         items: [
+            { type: 'get_sensor_info', icon: '🌡️', title: '获取传感器信息', desc: '读取设备列表或最近数据写入变量。' },
+            { type: 'db_query', icon: '🗄️', title: '数据库查询', desc: '执行只读 SQL 并把结果写入变量。' },
             { type: 'output', icon: '📤', title: '输出端口节点', desc: '引用本地变量并暴露给项目端口。' }
         ]
     }

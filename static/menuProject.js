@@ -1,4 +1,4 @@
-﻿import { state, setWorkflowPorts, setWorkflowVariables } from './appStore.js';
+import { state, setWorkflowPorts, setWorkflowVariables } from './appStore.js';
 import { addConsoleLog, escapeHtml, showModal } from './appUtils.js';
 import {
     getNodePortFieldOptions,
@@ -94,6 +94,13 @@ function syncNodeVariableReferences(validVariableIds) {
             const variableId = node.properties?.variableId;
             if (variableId && !validVariableIds.has(variableId)) {
                 node.properties.variableId = null;
+            }
+        }
+
+        if (node.type === 'get_sensor_info' || node.type === 'db_query') {
+            const variableId = node.properties?.targetVariableId;
+            if (variableId && !validVariableIds.has(variableId)) {
+                node.properties.targetVariableId = null;
             }
         }
     }

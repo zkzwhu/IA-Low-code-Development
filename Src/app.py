@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Any
+
 
 from flask import Flask, jsonify, render_template, request
 
 from debug_runtime import create_session, serialize_state, step_once
+from database import SensorDatabase
+
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 template_dir = os.path.join(current_dir, '..', 'templates')
@@ -21,6 +25,8 @@ current_workflow = {
 }
 
 debug_sessions: dict[str, dict[str, Any]] = {}
+sensor_db = SensorDatabase()
+
 
 
 def safe_int(value: Any, default: int = 0) -> int:
@@ -28,6 +34,9 @@ def safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+
 
 
 def node_name(node: dict[str, Any]) -> str:
@@ -68,6 +77,36 @@ def resolve_variable_value(variable_id: str | None, variable_values: dict[str, A
     if variable.get('dataType') == 'int':
         return safe_int(value, safe_int(variable.get('defaultValue'), 0))
     return '' if value is None else str(value)
+
+
+def assign_variable_value(variable_id: str | None, raw_value: Any, variable_values: dict[str, Any], variable_defs_by_id: dict[str, dict[str, Any]]) -> tuple[bool, Any]:
+    variable = variable_defs_by_id.get(str(variable_id)) if variable_id else None
+    if not variable:
+        return False, raw_value
+    if variable.get('dataType') == 'int':
+        converted = safe_int(raw_value, safe_int(variable.get('defaultValue'), 0))
+        variable_values[variable['id']] = converted
+        return True, converted
+    if isinstance(raw_value, (dict, list)):
+        converted = json.dumps(raw_value, ensure_ascii=False)
+    else:
+        converted = '' if raw_value is None else str(raw_value)
+    variable_values[variable['id']] = converted
+    return True, converted
+
+
+def run_readonly_query(sql: str) -> list[dict[str, Any]]:
+    normalized = str(sql or '').strip()
+    lowered = normalized.lower()
+    if not lowered.startswith('select '):
+        raise ValueError('仅支持 SELECT 查询')
+    if ';' in normalized:
+        raise ValueError('SQL 中不允许使用分号')
+    conn = sensor_db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(normalized)
+    rows = cursor.fetchall()
+    return [dict(row) for row in rows]
 
 
 @app.route('/')
@@ -166,6 +205,48 @@ def execute_workflow():
             outputs[str(node.get('id'))] = value
             variable_name = variable_defs_by_id.get(str(variable_id), {}).get('name', '未绑定变量')
             add_log(f"{indent}输出端口: {variable_name} = {value}")
+            exec_node(props.get('nextNodeId'), depth)
+            return
+
+        if node_type == 'get_sensor_info':
+            source = props.get('source', 'list_sensors')
+            limit = max(1, min(safe_int(props.get('limit', 5), 5), 100))
+            device_id = str(props.get('deviceId') or '').strip() or 'SmartAgriculture_thermometer'
+            payload: Any = []
+            try:
+                if source == 'latest_data':
+                    payload = sensor_db.get_latest_sensor_data(device_id, limit)
+                    add_log(f"{indent}读取传感器最近数据: device={device_id}, rows={len(payload)}")
+                else:
+                    payload = sensor_db.list_sensors()
+                    add_log(f"{indent}读取传感器设备列表: rows={len(payload)}")
+            except Exception as exc:
+                payload = []
+                add_log(f"{indent}读取传感器信息失败: {exc}")
+
+            written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
+            if written:
+                add_log(f"{indent}写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+            else:
+                add_log(f"{indent}未写入变量：未绑定 targetVariableId")
+            exec_node(props.get('nextNodeId'), depth)
+            return
+
+        if node_type == 'db_query':
+            sql = str(props.get('sql') or '').strip()
+            payload: Any = []
+            try:
+                payload = run_readonly_query(sql)
+                add_log(f"{indent}数据库查询成功: rows={len(payload)}")
+            except Exception as exc:
+                payload = []
+                add_log(f"{indent}数据库查询失败: {exc}")
+
+            written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
+            if written:
+                add_log(f"{indent}写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+            else:
+                add_log(f"{indent}未写入变量：未绑定 targetVariableId")
             exec_node(props.get('nextNodeId'), depth)
             return
 
@@ -297,6 +378,9 @@ def debug_stop():
     session_id = data.get('session_id')
     debug_sessions.pop(session_id, None)
     return jsonify({'status': 'ok'})
+
+
+
 
 
 if __name__ == '__main__':
