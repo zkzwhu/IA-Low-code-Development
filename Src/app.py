@@ -24,29 +24,14 @@ current_workflow = {
 debug_sessions: dict[str, dict[str, Any]] = {}
 
 smart_agriculture_mock_data = {
-    'system': {
-        'title': '系统运行态势',
-        'onlineDevices': '128 台',
-        'todayData': '82.4 MB',
-        'runTime': '36天 12小时',
-        'footer': '边缘网关、采集终端与云端连接正常'
-    },
-    'environment': {
-        'title': '环境监测',
-        'temperature': '24.6 °C',
-        'humidity': '68 %',
-        'pm25': '21 ug/m3',
-        'light': '18500 Lux',
-        'updatedAt': ''
-    },
-    'communication': {
-        'title': '实时通讯',
-        'mqttStatus': '在线',
-        'dataIntegrity': '99.6%',
-        'messageRate': '248 条/分',
-        'latency': '86 ms',
-        'lastSync': '',
-        'broker': 'tcp://127.0.0.1:1883'
+    'sensor': {
+        'title': '传感器数据',
+        'sensors': [
+            {'name': '温度传感器', 'value': '24.6', 'unit': '°C', 'status': '正常'},
+            {'name': '湿度传感器', 'value': '68', 'unit': '%', 'status': '正常'},
+            {'name': '光照传感器', 'value': '18500', 'unit': 'Lux', 'status': '正常'},
+            {'name': '土壤湿度', 'value': '45', 'unit': '%', 'status': '正常'}
+        ]
     }
 }
 
@@ -103,22 +88,12 @@ def current_time_text() -> str:
 
 
 def build_smart_agriculture_payload() -> dict[str, dict[str, Any]]:
-    system_data = {
-        **smart_agriculture_mock_data['system'],
-    }
-    environment_data = {
-        **smart_agriculture_mock_data['environment'],
-        'updatedAt': smart_agriculture_mock_data['environment'].get('updatedAt') or current_time_text(),
-    }
-    communication_data = {
-        **smart_agriculture_mock_data['communication'],
-        'lastSync': smart_agriculture_mock_data['communication'].get('lastSync') or current_time_text(),
+    sensor_data = {
+        **smart_agriculture_mock_data['sensor'],
     }
 
     return {
-        'system': system_data,
-        'environment': environment_data,
-        'communication': communication_data,
+        'sensor': sensor_data,
     }
 
 
@@ -142,19 +117,9 @@ def get_agriculture_dashboard():
     return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()})
 
 
-@app.route('/api/agriculture/system', methods=['GET'])
-def get_agriculture_system():
-    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['system']})
-
-
-@app.route('/api/agriculture/environment', methods=['GET'])
-def get_agriculture_environment():
-    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['environment']})
-
-
-@app.route('/api/agriculture/communication', methods=['GET'])
-def get_agriculture_communication():
-    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['communication']})
+@app.route('/api/agriculture/sensor', methods=['GET'])
+def get_agriculture_sensor():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['sensor']})
 
 
 @app.route('/api/agriculture/mock/update', methods=['POST'])

@@ -30,22 +30,10 @@ const COMPONENT_LIBRARY = [
         description: '导入 CSV 数据并显示为饼图、折线图或柱状图。'
     },
     {
-        type: 'agri-system',
-        icon: '🖥️',
-        title: '系统数据卡',
-        description: '展示在线设备、今日数据量、运行时间等智慧农业系统指标。'
-    },
-    {
-        type: 'agri-environment',
-        icon: '🌿',
-        title: '环境监测卡',
-        description: '展示温度、湿度、PM2.5、光照等环境数据。'
-    },
-    {
-        type: 'agri-communication',
-        icon: '📡',
-        title: '通讯状态卡',
-        description: '展示 MQTT 状态、数据完整性、消息速率、时延等通讯信息。'
+        type: 'agri-sensor',
+        icon: '📏',
+        title: '传感器数据',
+        description: '展示各类传感器的数据，包括温度、湿度、光照等。'
     }
 ];
 
@@ -189,9 +177,7 @@ function summarizeComponentProps(component) {
     if (component.type === 'text') return `文本：${component.props.text || ''}`;
     if (component.type === 'image') return `图片说明：${component.props.alt || '未设置'}`;
     if (component.type === 'chart') return `图表类型：${component.props.chartType || 'bar'}`;
-    if (component.type === 'agri-system') return `在线设备：${component.props.onlineDevices || ''}`;
-    if (component.type === 'agri-environment') return `温度：${component.props.temperature || ''}，湿度：${component.props.humidity || ''}`;
-    if (component.type === 'agri-communication') return `MQTT：${component.props.mqttStatus || ''}，完整性：${component.props.dataIntegrity || ''}`;
+    if (component.type === 'agri-sensor') return `传感器数量：${component.props.sensors?.length || 0}`;
     return '';
 }
 
@@ -258,6 +244,7 @@ function createChartComponent(x, y) {
         width: 520,
         height: 320,
         props: {
+            title: '',
             chartType: 'bar',
             csvText: '类别,值\n销售,120\n成本,80\n利润,45',
             labelColumn: '',
@@ -267,68 +254,25 @@ function createChartComponent(x, y) {
     };
 }
 
-function createAgricultureSystemComponent(x, y) {
+function createSensorComponent(x, y) {
     return {
         id: state.nextId++,
-        type: 'agri-system',
+        type: 'agri-sensor',
         x,
         y,
         width: 430,
-        height: 280,
+        height: 400,
         props: {
-            title: '系统运行态势',
+            title: '传感器数据',
             dataMode: SOURCE_MODE_MANUAL,
-            apiPath: '/api/agriculture/system',
+            apiPath: '/api/agriculture/sensor',
             refreshInterval: 30,
-            onlineDevices: '128 台',
-            todayData: '82.4 MB',
-            runTime: '36天 12小时',
-            footer: '边缘网关、采集终端与云端连接正常'
-        }
-    };
-}
-
-function createAgricultureEnvironmentComponent(x, y) {
-    return {
-        id: state.nextId++,
-        type: 'agri-environment',
-        x,
-        y,
-        width: 430,
-        height: 310,
-        props: {
-            title: '环境监测',
-            dataMode: SOURCE_MODE_MANUAL,
-            apiPath: '/api/agriculture/environment',
-            refreshInterval: 30,
-            temperature: '24.6 °C',
-            humidity: '68 %',
-            pm25: '21 ug/m3',
-            light: '18500 Lux',
-            updatedAt: '2026-04-04 14:20:00'
-        }
-    };
-}
-
-function createAgricultureCommunicationComponent(x, y) {
-    return {
-        id: state.nextId++,
-        type: 'agri-communication',
-        x,
-        y,
-        width: 430,
-        height: 320,
-        props: {
-            title: '实时通讯',
-            dataMode: SOURCE_MODE_MANUAL,
-            apiPath: '/api/agriculture/communication',
-            refreshInterval: 15,
-            mqttStatus: '在线',
-            dataIntegrity: '99.6%',
-            messageRate: '248 条/分',
-            latency: '86 ms',
-            lastSync: '2026-04-04 14:20:12',
-            broker: 'tcp://127.0.0.1:1883'
+            sensors: [
+                { name: '温度传感器', value: '24.6 °C', unit: '°C', status: '正常' },
+                { name: '湿度传感器', value: '68', unit: '%', status: '正常' },
+                { name: '光照传感器', value: '18500', unit: 'Lux', status: '正常' },
+                { name: '土壤湿度', value: '45', unit: '%', status: '正常' }
+            ]
         }
     };
 }
@@ -337,9 +281,7 @@ function createComponent(type, x, y) {
     if (type === 'text') return createTextComponent(x, y);
     if (type === 'image') return createImageComponent(x, y);
     if (type === 'chart') return createChartComponent(x, y);
-    if (type === 'agri-system') return createAgricultureSystemComponent(x, y);
-    if (type === 'agri-environment') return createAgricultureEnvironmentComponent(x, y);
-    if (type === 'agri-communication') return createAgricultureCommunicationComponent(x, y);
+    if (type === 'agri-sensor') return createSensorComponent(x, y);
     return null;
 }
 
@@ -349,24 +291,16 @@ function normalizeComponent(rawComponent) {
         ? 'image'
         : rawComponent?.type === 'chart'
             ? 'chart'
-            : rawComponent?.type === 'agri-system'
-                ? 'agri-system'
-                : rawComponent?.type === 'agri-environment'
-                    ? 'agri-environment'
-                    : rawComponent?.type === 'agri-communication'
-                        ? 'agri-communication'
-                        : 'text';
+            : rawComponent?.type === 'agri-sensor'
+                ? 'agri-sensor'
+                : 'text';
     const component = type === 'image'
         ? createImageComponent(80, 80)
         : type === 'chart'
             ? createChartComponent(80, 80)
-            : type === 'agri-system'
-                ? createAgricultureSystemComponent(80, 80)
-                : type === 'agri-environment'
-                    ? createAgricultureEnvironmentComponent(80, 80)
-                    : type === 'agri-communication'
-                        ? createAgricultureCommunicationComponent(80, 80)
-                        : createTextComponent(80, 80);
+            : type === 'agri-sensor'
+                ? createSensorComponent(80, 80)
+                : createTextComponent(80, 80);
 
     component.id = baseId;
     component.x = Number.isFinite(Number(rawComponent?.x)) ? Number(rawComponent.x) : component.x;
@@ -382,7 +316,7 @@ function normalizeComponent(rawComponent) {
 }
 
 function isAgricultureComponentType(type) {
-    return type === 'agri-system' || type === 'agri-environment' || type === 'agri-communication';
+    return type === 'agri-sensor';
 }
 
 function usesWorkflowSource(type) {
@@ -748,6 +682,10 @@ function resolveChartColumns(parsed, component) {
 
 function buildChartRows(parsed, columns) {
     const records = Array.isArray(parsed?.records) ? parsed.records : [];
+    const MAX_ROWS = 100; // 数据上限为100行
+    if (records.length > MAX_ROWS) {
+        return { error: `数据行数过多（${records.length}），最多支持 ${MAX_ROWS} 行。`, rows: [] };
+    }
     const rows = records.map((record, index) => {
         const labelText = String(record?.[columns.labelColumn] ?? '').trim();
         const value = Number(record?.[columns.valueColumn]);
@@ -835,7 +773,7 @@ function renderChartSvg(chartType, rows, width, height) {
             return `<path d="${path}" fill="${colors[index % colors.length]}" />`;
         }).join('');
 
-        const legend = rows.slice(0, 5).map((item, index) => `
+        const legend = rows.slice(0, 10).map((item, index) => `
             <div class="chart-legend-item"><span style="background:${colors[index % colors.length]}"></span>${escapeHtml(item.label)}</div>
         `).join('');
 
@@ -902,8 +840,10 @@ function getChartPreviewHtml(component) {
         return `<div class="chart-error">${escapeHtml(chartState.chartRows.error)}</div>`;
     }
     const rows = chartState.chartRows?.rows || [];
+    const title = component.props.title || '';
     return `
         <div class="chart-wrapper">
+            ${title ? `<div class="chart-title">${escapeHtml(title)}</div>` : ''}
             ${chartState.sourceNote ? `<div class="chart-source-note">${escapeHtml(chartState.sourceNote)}</div>` : ''}
             ${renderChartSvg(chartState.chartType, rows, width, height)}
         </div>
@@ -918,117 +858,39 @@ function getAgricultureRefreshInterval(component) {
     return clamp(Number(component?.props?.refreshInterval) || 30, 5, 3600);
 }
 
-function getCommunicationStatusTone(status) {
-    const text = String(status || '').trim().toLowerCase();
-    if (!text) return 'neutral';
-    if (text.includes('离线') || text.includes('中断') || text.includes('异常')) return 'offline';
-    if (text.includes('告警') || text.includes('波动') || text.includes('延迟')) return 'warn';
-    if (text.includes('在线') || text.includes('正常') || text.includes('已连接')) return 'online';
-    return 'neutral';
-}
-
-function renderAgricultureSystemMarkup(component, preview = false) {
+function renderSensorMarkup(component, preview = false) {
     const modeLabel = getAgricultureDataMode(component) === AGRI_DATA_MODE_API ? 'API' : '手动';
     const rootAttrs = preview
-        ? ` data-agri-component="agri-system" data-agri-mode="${escapeHtml(getAgricultureDataMode(component))}" data-api-path="${escapeHtml(component.props.apiPath || '')}" data-refresh-interval="${getAgricultureRefreshInterval(component)}"`
+        ? ` data-agri-component="agri-sensor" data-agri-mode="${escapeHtml(getAgricultureDataMode(component))}" data-api-path="${escapeHtml(component.props.apiPath || '')}" data-refresh-interval="${getAgricultureRefreshInterval(component)}"`
         : '';
 
+    const sensors = Array.isArray(component.props.sensors) ? component.props.sensors : [];
+    const sensorRows = sensors.map(sensor => `
+        <div class="agri-sensor-row">
+            <span class="agri-sensor-name">${escapeHtml(sensor.name || '')}</span>
+            <span class="agri-sensor-value">${escapeHtml(sensor.value || '')} ${escapeHtml(sensor.unit || '')}</span>
+            <span class="agri-sensor-status" data-status="${sensor.status === '正常' ? 'normal' : 'warning'}">${escapeHtml(sensor.status || '')}</span>
+        </div>
+    `).join('');
+
     return `
-        <div class="agri-panel agri-system-panel"${rootAttrs}>
+        <div class="agri-panel agri-sensor-panel"${rootAttrs}>
             <div class="agri-panel-head">
                 <div>
-                    <div class="agri-panel-eyebrow">Smart Farm / System</div>
-                    <div class="agri-panel-title" data-field="title">${escapeHtml(component.props.title || '系统运行态势')}</div>
+                    <div class="agri-panel-eyebrow">Sensors / Data</div>
+                    <div class="agri-panel-title" data-field="title">${escapeHtml(component.props.title || '传感器数据')}</div>
                 </div>
                 <div class="agri-mode-chip">${modeLabel}</div>
             </div>
-            <div class="agri-kpi-grid">
-                <div class="agri-kpi-card">
-                    <div class="agri-kpi-label">在线设备</div>
-                    <div class="agri-kpi-value" data-field="onlineDevices">${escapeHtml(component.props.onlineDevices || '')}</div>
-                </div>
-                <div class="agri-kpi-card">
-                    <div class="agri-kpi-label">今日数据量</div>
-                    <div class="agri-kpi-value" data-field="todayData">${escapeHtml(component.props.todayData || '')}</div>
-                </div>
-                <div class="agri-kpi-card wide">
-                    <div class="agri-kpi-label">连续运行时间</div>
-                    <div class="agri-kpi-value" data-field="runTime">${escapeHtml(component.props.runTime || '')}</div>
-                </div>
-            </div>
-            <div class="agri-panel-footer" data-field="footer">${escapeHtml(component.props.footer || '')}</div>
-        </div>
-    `;
-}
-
-function renderAgricultureEnvironmentMarkup(component, preview = false) {
-    const modeLabel = getAgricultureDataMode(component) === AGRI_DATA_MODE_API ? 'API' : '手动';
-    const rootAttrs = preview
-        ? ` data-agri-component="agri-environment" data-agri-mode="${escapeHtml(getAgricultureDataMode(component))}" data-api-path="${escapeHtml(component.props.apiPath || '')}" data-refresh-interval="${getAgricultureRefreshInterval(component)}"`
-        : '';
-
-    return `
-        <div class="agri-panel agri-environment-panel"${rootAttrs}>
-            <div class="agri-panel-head">
-                <div>
-                    <div class="agri-panel-eyebrow">Greenhouse / Environment</div>
-                    <div class="agri-panel-title" data-field="title">${escapeHtml(component.props.title || '环境监测')}</div>
-                </div>
-                <div class="agri-mode-chip">${modeLabel}</div>
-            </div>
-            <div class="agri-sensor-grid">
-                <div class="agri-sensor-card">
-                    <div class="agri-sensor-label">温度</div>
-                    <div class="agri-sensor-value" data-field="temperature">${escapeHtml(component.props.temperature || '')}</div>
-                </div>
-                <div class="agri-sensor-card">
-                    <div class="agri-sensor-label">湿度</div>
-                    <div class="agri-sensor-value" data-field="humidity">${escapeHtml(component.props.humidity || '')}</div>
-                </div>
-                <div class="agri-sensor-card">
-                    <div class="agri-sensor-label">PM2.5</div>
-                    <div class="agri-sensor-value" data-field="pm25">${escapeHtml(component.props.pm25 || '')}</div>
-                </div>
-                <div class="agri-sensor-card">
-                    <div class="agri-sensor-label">光照</div>
-                    <div class="agri-sensor-value" data-field="light">${escapeHtml(component.props.light || '')}</div>
-                </div>
-            </div>
-            <div class="agri-panel-footer">最近更新时间：<span data-field="updatedAt">${escapeHtml(component.props.updatedAt || '')}</span></div>
-        </div>
-    `;
-}
-
-function renderAgricultureCommunicationMarkup(component, preview = false) {
-    const modeLabel = getAgricultureDataMode(component) === AGRI_DATA_MODE_API ? 'API' : '手动';
-    const rootAttrs = preview
-        ? ` data-agri-component="agri-communication" data-agri-mode="${escapeHtml(getAgricultureDataMode(component))}" data-api-path="${escapeHtml(component.props.apiPath || '')}" data-refresh-interval="${getAgricultureRefreshInterval(component)}"`
-        : '';
-
-    return `
-        <div class="agri-panel agri-communication-panel"${rootAttrs}>
-            <div class="agri-panel-head">
-                <div>
-                    <div class="agri-panel-eyebrow">Realtime / Communication</div>
-                    <div class="agri-panel-title" data-field="title">${escapeHtml(component.props.title || '实时通讯')}</div>
-                </div>
-                <div class="agri-status-pill" data-field="mqttStatus" data-status="${escapeHtml(getCommunicationStatusTone(component.props.mqttStatus))}">${escapeHtml(component.props.mqttStatus || '')}</div>
-            </div>
-            <div class="agri-comm-broker">MQTT Broker：<span data-field="broker">${escapeHtml(component.props.broker || '')}</span></div>
-            <div class="agri-comm-list">
-                <div class="agri-comm-row"><span>数据完整性</span><strong data-field="dataIntegrity">${escapeHtml(component.props.dataIntegrity || '')}</strong></div>
-                <div class="agri-comm-row"><span>消息速率</span><strong data-field="messageRate">${escapeHtml(component.props.messageRate || '')}</strong></div>
-                <div class="agri-comm-row"><span>平均时延</span><strong data-field="latency">${escapeHtml(component.props.latency || '')}</strong></div>
-                <div class="agri-comm-row"><span>最后同步</span><strong data-field="lastSync">${escapeHtml(component.props.lastSync || '')}</strong></div>
+            <div class="agri-sensor-list">
+                ${sensorRows}
             </div>
         </div>
     `;
 }
 
 function renderAgricultureComponentMarkup(component, preview = false) {
-    if (component.type === 'agri-system') return renderAgricultureSystemMarkup(component, preview);
-    if (component.type === 'agri-environment') return renderAgricultureEnvironmentMarkup(component, preview);
-    if (component.type === 'agri-communication') return renderAgricultureCommunicationMarkup(component, preview);
+    if (component.type === 'agri-sensor') return renderSensorMarkup(component, preview);
     return '';
 }
 
@@ -1497,6 +1359,10 @@ function renderChartSettings(component) {
             <h3>图表设置</h3>
             <div class="prop-grid">
                 <div>
+                    <label class="prop-label" for="chartTitleInput">图表标题</label>
+                    <input class="prop-input" id="chartTitleInput" type="text" value="${escapeHtml(component.props.title || '')}" placeholder="输入图表标题">
+                </div>
+                <div>
                     <label class="prop-label" for="chartTypeInput">图表类型</label>
                     <select class="prop-select" id="chartTypeInput">
                         <option value="bar" ${component.props.chartType === 'bar' ? 'selected' : ''}>柱状图</option>
@@ -1567,110 +1433,38 @@ function renderAgricultureDataSourceSection(component) {
             </div>
             <div>
                 <label class="prop-label" for="agriApiPathInput">接口路径</label>
-                <input class="prop-input" id="agriApiPathInput" type="text" value="${escapeHtml(component.props.apiPath || '')}" placeholder="/api/agriculture/system">
+                <input class="prop-input" id="agriApiPathInput" type="text" value="${escapeHtml(component.props.apiPath || '')}" placeholder="/api/agriculture/sensor">
             </div>
             <p class="prop-hint">切换到“后端接口”后，运行生成网页时会按设定间隔轮询该接口，并用返回数据覆盖当前卡片展示内容。</p>
         </section>
     `;
 }
 
-function renderAgricultureSystemSettings(component) {
+function renderSensorSettings(component) {
     return `
         <section class="prop-section">
-            <h3>系统数据内容</h3>
+            <h3>传感器数据内容</h3>
             <div>
-                <label class="prop-label" for="agriSystemTitleInput">标题</label>
-                <input class="prop-input" id="agriSystemTitleInput" type="text" value="${escapeHtml(component.props.title || '')}">
-            </div>
-            <div class="prop-grid">
-                <div>
-                    <label class="prop-label" for="agriOnlineDevicesInput">在线设备</label>
-                    <input class="prop-input" id="agriOnlineDevicesInput" type="text" value="${escapeHtml(component.props.onlineDevices || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="agriTodayDataInput">今日数据量</label>
-                    <input class="prop-input" id="agriTodayDataInput" type="text" value="${escapeHtml(component.props.todayData || '')}">
-                </div>
+                <label class="prop-label" for="sensorTitleInput">标题</label>
+                <input class="prop-input" id="sensorTitleInput" type="text" value="${escapeHtml(component.props.title || '')}">
             </div>
             <div>
-                <label class="prop-label" for="agriRunTimeInput">运行时间</label>
-                <input class="prop-input" id="agriRunTimeInput" type="text" value="${escapeHtml(component.props.runTime || '')}">
-            </div>
-            <div>
-                <label class="prop-label" for="agriSystemFooterInput">底部说明</label>
-                <textarea class="prop-textarea" id="agriSystemFooterInput">${escapeHtml(component.props.footer || '')}</textarea>
-            </div>
-        </section>
-    `;
-}
-
-function renderAgricultureEnvironmentSettings(component) {
-    return `
-        <section class="prop-section">
-            <h3>环境数据内容</h3>
-            <div>
-                <label class="prop-label" for="agriEnvironmentTitleInput">标题</label>
-                <input class="prop-input" id="agriEnvironmentTitleInput" type="text" value="${escapeHtml(component.props.title || '')}">
-            </div>
-            <div class="prop-grid">
-                <div>
-                    <label class="prop-label" for="agriTemperatureInput">温度</label>
-                    <input class="prop-input" id="agriTemperatureInput" type="text" value="${escapeHtml(component.props.temperature || '')}">
+                <label class="prop-label">传感器列表</label>
+                <div id="sensorListContainer">
+                    ${Array.isArray(component.props.sensors) ? component.props.sensors.map((sensor, index) => `
+                        <div class="sensor-item" data-index="${index}">
+                            <input class="prop-input sensor-name" type="text" value="${escapeHtml(sensor.name || '')}" placeholder="传感器名称">
+                            <input class="prop-input sensor-value" type="text" value="${escapeHtml(sensor.value || '')}" placeholder="数值">
+                            <input class="prop-input sensor-unit" type="text" value="${escapeHtml(sensor.unit || '')}" placeholder="单位">
+                            <select class="prop-select sensor-status">
+                                <option value="正常" ${sensor.status === '正常' ? 'selected' : ''}>正常</option>
+                                <option value="异常" ${sensor.status === '异常' ? 'selected' : ''}>异常</option>
+                            </select>
+                            <button class="prop-btn danger remove-sensor-btn">删除</button>
+                        </div>
+                    `).join('') : ''}
                 </div>
-                <div>
-                    <label class="prop-label" for="agriHumidityInput">湿度</label>
-                    <input class="prop-input" id="agriHumidityInput" type="text" value="${escapeHtml(component.props.humidity || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="agriPm25Input">PM2.5</label>
-                    <input class="prop-input" id="agriPm25Input" type="text" value="${escapeHtml(component.props.pm25 || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="agriLightInput">光照</label>
-                    <input class="prop-input" id="agriLightInput" type="text" value="${escapeHtml(component.props.light || '')}">
-                </div>
-            </div>
-            <div>
-                <label class="prop-label" for="agriEnvironmentUpdatedAtInput">更新时间</label>
-                <input class="prop-input" id="agriEnvironmentUpdatedAtInput" type="text" value="${escapeHtml(component.props.updatedAt || '')}">
-            </div>
-        </section>
-    `;
-}
-
-function renderAgricultureCommunicationSettings(component) {
-    return `
-        <section class="prop-section">
-            <h3>通讯数据内容</h3>
-            <div>
-                <label class="prop-label" for="agriCommunicationTitleInput">标题</label>
-                <input class="prop-input" id="agriCommunicationTitleInput" type="text" value="${escapeHtml(component.props.title || '')}">
-            </div>
-            <div>
-                <label class="prop-label" for="agriBrokerInput">Broker 地址</label>
-                <input class="prop-input" id="agriBrokerInput" type="text" value="${escapeHtml(component.props.broker || '')}">
-            </div>
-            <div class="prop-grid">
-                <div>
-                    <label class="prop-label" for="agriMqttStatusInput">MQTT 状态</label>
-                    <input class="prop-input" id="agriMqttStatusInput" type="text" value="${escapeHtml(component.props.mqttStatus || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="agriIntegrityInput">数据完整性</label>
-                    <input class="prop-input" id="agriIntegrityInput" type="text" value="${escapeHtml(component.props.dataIntegrity || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="agriMessageRateInput">消息速率</label>
-                    <input class="prop-input" id="agriMessageRateInput" type="text" value="${escapeHtml(component.props.messageRate || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="agriLatencyInput">平均时延</label>
-                    <input class="prop-input" id="agriLatencyInput" type="text" value="${escapeHtml(component.props.latency || '')}">
-                </div>
-            </div>
-            <div>
-                <label class="prop-label" for="agriLastSyncInput">最后同步时间</label>
-                <input class="prop-input" id="agriLastSyncInput" type="text" value="${escapeHtml(component.props.lastSync || '')}">
+                <button class="prop-btn" id="addSensorBtn">添加传感器</button>
             </div>
         </section>
     `;
@@ -1686,9 +1480,7 @@ function renderComponentSettingsSection(component) {
     if (component.type === 'text') return renderTextSettings(component);
     if (component.type === 'image') return renderImageSettings(component);
     if (component.type === 'chart') return renderChartSettings(component);
-    if (component.type === 'agri-system') return renderAgricultureSystemSettings(component);
-    if (component.type === 'agri-environment') return renderAgricultureEnvironmentSettings(component);
-    if (component.type === 'agri-communication') return renderAgricultureCommunicationSettings(component);
+    if (component.type === 'agri-sensor') return renderSensorSettings(component);
     return '';
 }
 
@@ -1976,12 +1768,19 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
     }
 
     if (component.type === 'chart') {
+        const chartTitleInput = document.getElementById('chartTitleInput');
         const chartTypeInput = document.getElementById('chartTypeInput');
         const csvUploadInput = document.getElementById('chartCsvUploadInput');
         const csvTextInput = document.getElementById('chartCsvTextInput');
         const chartLabelColumnInput = document.getElementById('chartLabelColumnInput');
         const chartValueColumnInput = document.getElementById('chartValueColumnInput');
 
+        if (chartTitleInput) {
+            chartTitleInput.addEventListener('input', () => {
+                component.props.title = chartTitleInput.value;
+                renderStage();
+            });
+        }
         if (chartTypeInput) {
             chartTypeInput.addEventListener('change', () => {
                 component.props.chartType = chartTypeInput.value;
@@ -2839,28 +2638,18 @@ function seedDemoProject() {
     subtitle.props.fontWeight = '600';
     subtitle.props.color = '#486070';
 
-    const system = createAgricultureSystemComponent(70, 320);
-    system.width = 400;
-    system.height = 280;
+    const sensor = createSensorComponent(70, 320);
+    sensor.width = 400;
+    sensor.height = 400;
 
-    const environment = createAgricultureEnvironmentComponent(520, 320);
-    environment.width = 400;
-    environment.height = 310;
-
-    const communication = createAgricultureCommunicationComponent(970, 320);
-    communication.width = 400;
-    communication.height = 320;
-
-    const chart = createChartComponent(520, 670);
+    const chart = createChartComponent(520, 320);
     chart.width = 850;
     chart.height = 180;
-    chart.props.csvText = '指标,数值\n在线设备,128\n温度,24.6\n湿度,68\nPM2.5,21\n光照,18500';
+    chart.props.csvText = '指标,数值\n温度,24.6\n湿度,68\n光照,18500\n土壤湿度,45';
 
     state.components.set(title.id, title);
     state.components.set(subtitle.id, subtitle);
-    state.components.set(system.id, system);
-    state.components.set(environment.id, environment);
-    state.components.set(communication.id, communication);
+    state.components.set(sensor.id, sensor);
     state.components.set(chart.id, chart);
 }
 

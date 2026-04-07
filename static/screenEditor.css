@@ -452,6 +452,14 @@ body {
     align-self: flex-start;
 }
 
+.chart-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #1a202c;
+    text-align: center;
+    margin-bottom: 8px;
+}
+
 .chart-legend {
     display: grid;
     gap: 6px;
@@ -631,11 +639,70 @@ body {
     color: rgba(219, 243, 248, 0.76);
 }
 
-.agri-comm-row strong {
+.agri-sensor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.agri-sensor-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(230, 249, 242, 0.08);
+    font-size: 12px;
+}
+
+.agri-sensor-name {
+    color: rgba(219, 243, 248, 0.76);
+    flex: 1;
+}
+
+.agri-sensor-value {
     color: #ffffff;
-    font-size: 13px;
-    text-align: right;
-    word-break: break-word;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.agri-sensor-status {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #14532d;
+    background: #86efac;
+}
+
+.sensor-item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.sensor-item .prop-input {
+    flex: 1;
+}
+
+.sensor-item .prop-select {
+    width: 80px;
+}
+
+.remove-sensor-btn {
+    background: #dc2626;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.remove-sensor-btn:hover {
+    background: #b91c1c;
 }
 
 .image-fill {
