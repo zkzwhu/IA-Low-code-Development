@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+from atexit import register
 from typing import Any
 
 
@@ -9,6 +10,7 @@ from flask import Flask, jsonify, render_template, request
 
 from debug_runtime import create_session, serialize_state, step_once
 from database import SensorDatabase
+from start_mqtt_listener import start_mqtt_listener
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +28,26 @@ current_workflow = {
 
 debug_sessions: dict[str, dict[str, Any]] = {}
 sensor_db = SensorDatabase()
+mqtt_db: SensorDatabase | None = None
+mqtt_handler = None
+
+
+def start_app_mqtt() -> None:
+    global mqtt_db, mqtt_handler
+    mqtt_db, mqtt_handler = start_mqtt_listener()
+
+
+def stop_app_mqtt() -> None:
+    global mqtt_db, mqtt_handler
+    if mqtt_handler:
+        mqtt_handler.stop()
+        mqtt_handler = None
+    if mqtt_db:
+        mqtt_db.close()
+        mqtt_db = None
+
+
+register(stop_app_mqtt)
 
 
 
@@ -384,4 +406,6 @@ def debug_stop():
 
 
 if __name__ == '__main__':
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        start_app_mqtt()
     app.run(debug=True)
