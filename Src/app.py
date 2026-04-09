@@ -49,6 +49,26 @@ def stop_app_mqtt() -> None:
 
 register(stop_app_mqtt)
 
+smart_agriculture_mock_data = {
+    'sensor': {
+        'title': '传感器数据',
+        'sensors': [
+            {'name': '温度传感器', 'value': '24.6', 'unit': '°C', 'status': '正常'},
+            {'name': '湿度传感器', 'value': '68', 'unit': '%', 'status': '正常'},
+            {'name': '光照传感器', 'value': '18500', 'unit': 'Lux', 'status': '正常'},
+            {'name': '土壤湿度', 'value': '45', 'unit': '%', 'status': '正常'}
+        ]
+    }
+}
+
+
+def build_smart_agriculture_payload() -> dict[str, dict[str, Any]]:
+    return {
+        'sensor': {
+            **smart_agriculture_mock_data['sensor'],
+        },
+    }
+
 
 
 def safe_int(value: Any, default: int = 0) -> int:
@@ -144,6 +164,36 @@ def workflow_editor():
 @app.route('/screen-editor')
 def screen_editor():
     return render_template('screen_editor.html')
+
+
+@app.route('/api/agriculture/dashboard', methods=['GET'])
+def get_agriculture_dashboard():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()})
+
+
+@app.route('/api/agriculture/sensor', methods=['GET'])
+def get_agriculture_sensor():
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['sensor']})
+
+
+@app.route('/api/agriculture/mock/update', methods=['POST'])
+def update_agriculture_mock():
+    payload = request.get_json() or {}
+    section = str(payload.get('section') or '').strip()
+    data = payload.get('data') or {}
+
+    if section not in smart_agriculture_mock_data:
+        return jsonify({'status': 'error', 'message': 'invalid section'}), 400
+    if not isinstance(data, dict):
+        return jsonify({'status': 'error', 'message': 'data must be an object'}), 400
+
+    for key, value in data.items():
+        if key == 'sensors' and isinstance(value, list):
+            smart_agriculture_mock_data[section][str(key)] = value
+        else:
+            smart_agriculture_mock_data[section][str(key)] = '' if value is None else str(value)
+
+    return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()[section]})
 
 
 @app.route('/api/workflow/save', methods=['POST'])

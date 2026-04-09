@@ -26,17 +26,32 @@
     <main class="editor-layout">
         <aside class="components-panel">
             <div class="panel-header">组件库</div>
-            <div class="panel-subtitle">先支持文本展示和图片展示两个基础组件。</div>
+            <div class="panel-subtitle">支持文本、图片、CSV 图表，以及智慧农业的系统数据卡、环境监测卡和通讯状态卡。</div>
             <div class="components-list" id="screenComponentLibrary"></div>
         </aside>
 
         <section class="canvas-panel">
-            <div class="canvas-toolbar">
-                <span class="toolbar-pill">拖拽组件到画布</span>
-                <span class="toolbar-pill subtle">选中后可拖动位置，并在右侧修改属性</span>
+            <div class="canvas-toolbar screen-statusbar">
+                <div class="statusbar-tools">
+                    <button type="button" class="statusbar-action-btn" id="screenSelectAllBtn">全选</button>
+                    <button type="button" class="statusbar-action-btn" id="screenCopyBtn">复制</button>
+                    <button type="button" class="statusbar-action-btn" id="screenCutBtn">剪切</button>
+                    <button type="button" class="statusbar-action-btn" id="screenPasteBtn">粘贴</button>
+                    <button type="button" class="statusbar-action-btn" id="screenDuplicateBtn">复制一份</button>
+                    <button type="button" class="statusbar-action-btn" id="screenBringToFrontBtn">置顶</button>
+                    <button type="button" class="statusbar-action-btn danger" id="screenDeleteBtn">删除</button>
+                </div>
+                <div class="statusbar-right">
+                    <button type="button" class="statusbar-btn" id="screenZoomOutBtn">-</button>
+                    <button type="button" class="statusbar-btn" id="screenZoomResetBtn">100%</button>
+                    <button type="button" class="statusbar-btn" id="screenZoomInBtn">+</button>
+                    <span class="statusbar-zoom" id="screenZoomLabel">缩放 100%</span>
+                </div>
             </div>
             <div class="canvas-area" id="screenCanvasArea">
-                <div class="screen-stage" id="screenStage"></div>
+                <div class="screen-viewport" id="screenViewport">
+                    <div class="screen-stage" id="screenStage"></div>
+                </div>
             </div>
         </section>
 

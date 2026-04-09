@@ -199,6 +199,94 @@ body {
     gap: 10px;
 }
 
+.screen-statusbar {
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(243, 248, 251, 0.98), rgba(232, 241, 246, 0.98));
+    border: 1px solid rgba(36, 90, 115, 0.10);
+}
+
+.statusbar-left,
+.statusbar-tools,
+.statusbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.statusbar-tools {
+    flex: 1;
+    justify-content: center;
+}
+
+.statusbar-btn {
+    min-width: 40px;
+    height: 36px;
+    border: none;
+    border-radius: 12px;
+    background: #245a73;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.statusbar-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(36, 90, 115, 0.16);
+}
+
+.statusbar-btn:active {
+    transform: translateY(0);
+}
+
+.statusbar-action-btn {
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid rgba(36, 90, 115, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.92);
+    color: #245a73;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, opacity 0.16s ease;
+}
+
+.statusbar-action-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 18px rgba(36, 90, 115, 0.12);
+    background: #ffffff;
+}
+
+.statusbar-action-btn:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.statusbar-action-btn.danger {
+    color: #a61b1b;
+    border-color: rgba(192, 57, 43, 0.18);
+    background: rgba(255, 244, 244, 0.95);
+}
+
+.statusbar-zoom {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: rgba(36, 90, 115, 0.10);
+    color: #245a73;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .toolbar-pill {
     display: inline-flex;
     align-items: center;
@@ -233,6 +321,12 @@ body {
     user-select: none;
 }
 
+.screen-viewport {
+    position: relative;
+    width: 1440px;
+    height: 900px;
+}
+
 .screen-stage {
     position: relative;
     width: 1440px;
@@ -243,6 +337,7 @@ body {
         inset 0 0 0 1px rgba(24, 36, 50, 0.06),
         0 26px 60px rgba(32, 48, 64, 0.14);
     overflow: hidden;
+    transform-origin: top left;
 }
 
 .screen-component {
@@ -260,6 +355,15 @@ body {
 
 .screen-component.selected {
     box-shadow: 0 0 0 3px rgba(44, 125, 160, 0.26), 0 18px 30px rgba(44, 125, 160, 0.18);
+}
+
+.screen-selection-box {
+    position: absolute;
+    border: 1px dashed #2c7da0;
+    background: rgba(44, 125, 160, 0.12);
+    border-radius: 12px;
+    pointer-events: none;
+    z-index: 999;
 }
 
 .screen-component.text-component {
@@ -294,6 +398,15 @@ body {
     overflow: hidden;
 }
 
+.screen-component.chart-component {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(36, 90, 115, 0.10);
+}
+
+.screen-component.agriculture-component {
+    background: transparent;
+}
+
 .image-placeholder {
     width: 100%;
     height: 100%;
@@ -317,6 +430,279 @@ body {
 .image-placeholder-note {
     font-size: 12px;
     opacity: 0.88;
+}
+
+.chart-wrapper {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 8px;
+}
+
+.chart-source-note {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(36, 90, 115, 0.10);
+    color: #245a73;
+    font-size: 11px;
+    font-weight: 700;
+    align-self: flex-start;
+}
+
+.chart-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #1a202c;
+    text-align: center;
+    margin-bottom: 8px;
+}
+
+.chart-legend {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: #475569;
+}
+
+.chart-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.chart-legend-item span {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.chart-error {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px;
+    color: #b91c1c;
+    background: rgba(254, 226, 226, 0.7);
+    border-radius: 14px;
+    text-align: center;
+    font-size: 13px;
+}
+
+.agri-panel {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(36, 90, 115, 0.12);
+    background: linear-gradient(160deg, rgba(7, 35, 49, 0.96), rgba(18, 74, 93, 0.92));
+    color: #f8fcff;
+    box-shadow: inset 0 0 0 1px rgba(165, 215, 228, 0.08);
+    overflow: hidden;
+}
+
+.agri-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.agri-panel-eyebrow {
+    color: rgba(194, 236, 229, 0.82);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.agri-panel-title {
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.agri-mode-chip {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(194, 236, 229, 0.14);
+    color: #c2ece5;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.agri-kpi-grid,
+.agri-sensor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.agri-kpi-card,
+.agri-sensor-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 12px;
+    border-radius: 16px;
+    background: rgba(230, 249, 242, 0.08);
+    border: 1px solid rgba(194, 236, 229, 0.10);
+}
+
+.agri-kpi-card.wide {
+    grid-column: span 2;
+}
+
+.agri-kpi-label,
+.agri-sensor-label {
+    color: rgba(219, 243, 248, 0.76);
+    font-size: 11px;
+}
+
+.agri-kpi-value,
+.agri-sensor-value {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.15;
+    word-break: break-word;
+}
+
+.agri-panel-footer {
+    margin-top: auto;
+    color: rgba(226, 242, 247, 0.84);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.agri-status-pill {
+    padding: 7px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #0f172a;
+    background: #cbd5e1;
+    white-space: nowrap;
+}
+
+.agri-status-pill[data-status="online"] {
+    background: #86efac;
+    color: #14532d;
+}
+
+.agri-status-pill[data-status="warn"] {
+    background: #fde68a;
+    color: #854d0e;
+}
+
+.agri-status-pill[data-status="offline"] {
+    background: #fca5a5;
+    color: #7f1d1d;
+}
+
+.agri-comm-broker {
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(230, 249, 242, 0.08);
+    color: rgba(237, 251, 255, 0.88);
+    font-size: 11px;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+.agri-comm-list {
+    display: grid;
+    gap: 8px;
+}
+
+.agri-comm-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 11px;
+    border-radius: 14px;
+    background: rgba(230, 249, 242, 0.08);
+    font-size: 12px;
+}
+
+.agri-comm-row span {
+    color: rgba(219, 243, 248, 0.76);
+}
+
+.agri-sensor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.agri-sensor-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(230, 249, 242, 0.08);
+    font-size: 12px;
+}
+
+.agri-sensor-name {
+    color: rgba(219, 243, 248, 0.76);
+    flex: 1;
+}
+
+.agri-sensor-value {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.agri-sensor-status {
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #14532d;
+    background: #86efac;
+}
+
+.sensor-item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.sensor-item .prop-input {
+    flex: 1;
+}
+
+.sensor-item .prop-select {
+    width: 80px;
+}
+
+.remove-sensor-btn {
+    background: #dc2626;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.remove-sensor-btn:hover {
+    background: #b91c1c;
 }
 
 .image-fill {
@@ -429,6 +815,21 @@ body {
     word-break: break-word;
 }
 
+.multi-prop-json {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(24, 36, 50, 0.04);
+    border: 1px solid rgba(24, 36, 50, 0.08);
+    color: #334e5c;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .danger-btn {
     border: none;
     padding: 11px 16px;
@@ -465,6 +866,14 @@ body {
     .screen-topbar {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .screen-statusbar {
+        align-items: flex-start;
+    }
+
+    .statusbar-tools {
+        justify-content: flex-start;
     }
 
     .editor-layout {

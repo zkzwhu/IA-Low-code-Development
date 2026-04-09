@@ -3,7 +3,10 @@ MQTT处理模块 - 处理MQTT连接和数据接收
 """
 import os
 
-import paho.mqtt.client as mqtt
+try:
+    import paho.mqtt.client as mqtt
+except ModuleNotFoundError:
+    mqtt = None
 import json
 import logging
 import threading
@@ -288,6 +291,10 @@ class MQTTHandler:
     def start(self):
         """启动MQTT监听"""
         # 检查并启动MQTT代理
+        if mqtt is None:
+            logger.error("Missing dependency: paho-mqtt. Install with: pip install paho-mqtt")
+            return False
+
         if not self.check_mqtt_broker():
             logger.info("MQTT代理未运行，正在尝试启动...")
             if not self.start_mqtt_broker():
