@@ -6,6 +6,7 @@ const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const SOURCE_MODE_MANUAL = 'manual';
 const SOURCE_MODE_WORKFLOW_PORT = 'workflow-port';
 const AGRI_DATA_MODE_API = 'api';
+const WEATHER_DATA_MODE_API = 'api';
 const DEFAULT_PAGE = { width: 1440, height: 900, background: '#f5f7fb' };
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
@@ -34,6 +35,12 @@ const COMPONENT_LIBRARY = [
         icon: '📏',
         title: '传感器数据',
         description: '展示各类传感器的数据，包括温度、湿度、光照等。'
+    },
+    {
+        type: 'weather',
+        icon: '🌤️',
+        title: '天气信息',
+        description: '通过 Open-Meteo 或自定义接口获取实时天气并展示在大屏上。'
     }
 ];
 
@@ -165,6 +172,7 @@ function getComponentTypeLabel(componentType) {
         text: '文本展示',
         image: '图片展示',
         chart: '图表展示',
+        weather: '天气信息',
         'agri-system': '系统数据卡',
         'agri-environment': '环境监测卡',
         'agri-communication': '通讯状态卡'
@@ -178,6 +186,7 @@ function summarizeComponentProps(component) {
     if (component.type === 'image') return `图片说明：${component.props.alt || '未设置'}`;
     if (component.type === 'chart') return `图表类型：${component.props.chartType || 'bar'}`;
     if (component.type === 'agri-sensor') return `传感器数量：${component.props.sensors?.length || 0}`;
+    if (component.type === 'weather') return `地点：${component.props.subtitle || '未命名'} · ${getWeatherDataMode(component) === WEATHER_DATA_MODE_API ? '外部 API' : '手动'}`;
     return '';
 }
 
@@ -277,11 +286,37 @@ function createSensorComponent(x, y) {
     };
 }
 
+function createWeatherComponent(x, y) {
+    return {
+        id: state.nextId++,
+        type: 'weather',
+        x,
+        y,
+        width: 380,
+        height: 300,
+        props: {
+            title: '天气预报',
+            subtitle: '北京',
+            dataMode: SOURCE_MODE_MANUAL,
+            latitude: 39.9042,
+            longitude: 116.4074,
+            customApiUrl: '',
+            refreshInterval: 600,
+            conditionText: '晴',
+            tempC: '22',
+            humidity: '65',
+            windKmh: '12',
+            updatedAt: '手动预览'
+        }
+    };
+}
+
 function createComponent(type, x, y) {
     if (type === 'text') return createTextComponent(x, y);
     if (type === 'image') return createImageComponent(x, y);
     if (type === 'chart') return createChartComponent(x, y);
     if (type === 'agri-sensor') return createSensorComponent(x, y);
+    if (type === 'weather') return createWeatherComponent(x, y);
     return null;
 }
 
@@ -293,14 +328,18 @@ function normalizeComponent(rawComponent) {
             ? 'chart'
             : rawComponent?.type === 'agri-sensor'
                 ? 'agri-sensor'
-                : 'text';
+                : rawComponent?.type === 'weather'
+                    ? 'weather'
+                    : 'text';
     const component = type === 'image'
         ? createImageComponent(80, 80)
         : type === 'chart'
             ? createChartComponent(80, 80)
             : type === 'agri-sensor'
                 ? createSensorComponent(80, 80)
-                : createTextComponent(80, 80);
+                : type === 'weather'
+                    ? createWeatherComponent(80, 80)
+                    : createTextComponent(80, 80);
 
     component.id = baseId;
     component.x = Number.isFinite(Number(rawComponent?.x)) ? Number(rawComponent.x) : component.x;
@@ -317,6 +356,159 @@ function normalizeComponent(rawComponent) {
 
 function isAgricultureComponentType(type) {
     return type === 'agri-sensor';
+}
+
+function isWeatherComponentType(type) {
+    return type === 'weather';
+}
+
+function getWeatherDataMode(component) {
+    return component?.props?.dataMode === WEATHER_DATA_MODE_API ? WEATHER_DATA_MODE_API : SOURCE_MODE_MANUAL;
+}
+
+const WEATHER_REFRESH_MIN_SEC = 10;
+const WEATHER_REFRESH_MAX_SEC = 86400;
+
+function getWeatherRefreshInterval(component) {
+    return clamp(Number(component?.props?.refreshInterval) || 600, WEATHER_REFRESH_MIN_SEC, WEATHER_REFRESH_MAX_SEC);
+}
+
+/** 任意 open-meteo.com 域名（含只填了 /v1/forecast 无查询串）一律走后端：直连会因缺少 latitude 等参数出现 HTTP 200 空正文 */
+function isOpenMeteoHostUrl(url) {
+    try {
+        const u = new URL(String(url || '').trim());
+        return /open-meteo\.com$/i.test(u.hostname.replace(/^www\./, ''));
+    } catch {
+        return false;
+    }
+}
+
+function weatherFetchUsesBackendProxy(component) {
+    const custom = typeof component.props?.customApiUrl === 'string' ? component.props.customApiUrl.trim() : '';
+    if (!custom) return true;
+    return isOpenMeteoHostUrl(custom);
+}
+
+function buildWeatherApiRequestUrlForEditor(component) {
+    const lat = Number.isFinite(Number(component.props.latitude)) ? Number(component.props.latitude) : 30.5928;
+    const lon = Number.isFinite(Number(component.props.longitude)) ? Number(component.props.longitude) : 114.3055;
+    if (weatherFetchUsesBackendProxy(component)) {
+        const base = resolveBackendOrigin().replace(/\/+$/, '');
+        const qs = new URLSearchParams();
+        qs.set('latitude', String(lat));
+        qs.set('longitude', String(lon));
+        return `${base}/api/weather/forecast?${qs.toString()}`;
+    }
+    const custom = component.props.customApiUrl.trim();
+    const abs = custom.startsWith('http://') || custom.startsWith('https://');
+    return abs ? custom : new URL(custom, resolveBackendOrigin()).toString();
+}
+
+function wmoWeatherCodeToLabel(code) {
+    const c = Number(code);
+    const map = {
+        0: '晴', 1: '大部晴朗', 2: '多云', 3: '阴', 45: '雾', 48: '雾',
+        51: '小毛毛雨', 53: '毛毛雨', 55: '大毛毛雨', 56: '冻毛毛雨', 57: '冻毛毛雨',
+        61: '小雨', 63: '中雨', 65: '大雨', 66: '冻雨', 67: '冻雨',
+        71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
+        80: '阵雨', 81: '强阵雨', 82: '暴雨', 85: '阵雪', 86: '阵雪',
+        95: '雷暴', 96: '雷暴伴冰雹', 99: '强雷暴伴冰雹'
+    };
+    if (!Number.isFinite(c)) return '—';
+    return map[c] || '天气';
+}
+
+function formatWeatherMetric(value, digits) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    const n = Number(value);
+    const d = Number.isFinite(digits) ? digits : 1;
+    return String(Math.round(n * Math.pow(10, d)) / Math.pow(10, d));
+}
+
+function applyOpenMeteoPayloadToWeatherProps(props, json) {
+    const current = json && json.current && typeof json.current === 'object' ? json.current : null;
+    if (!current) return false;
+    props.tempC = formatWeatherMetric(current.temperature_2m, 1);
+    props.humidity = formatWeatherMetric(current.relative_humidity_2m, 0);
+    props.windKmh = formatWeatherMetric(current.wind_speed_10m, 1);
+    props.conditionText = wmoWeatherCodeToLabel(current.weather_code);
+    const t = current.time ? String(current.time) : '';
+    props.updatedAt = t ? `观测时间 ${t}` : '已更新';
+    return true;
+}
+
+async function syncWeatherFromApiForComponent(component) {
+    if (!component || component.type !== 'weather' || getWeatherDataMode(component) !== WEATHER_DATA_MODE_API) return;
+    if (component._weatherFetching) return;
+    component._weatherLastFetchAt = Date.now();
+    component._weatherFetching = true;
+    const url = buildWeatherApiRequestUrlForEditor(component);
+    try {
+        const response = await fetch(url, { cache: 'no-store' });
+        const rawText = await response.text();
+        if (!response.ok) {
+            let msg = String(response.status);
+            try {
+                const errJson = JSON.parse(rawText);
+                if (errJson?.message != null) msg = String(errJson.message);
+                else if (errJson?.error != null) msg = String(errJson.error);
+            } catch (e) {
+                if (rawText && rawText.length < 200) msg = `${msg}: ${rawText}`;
+            }
+            component.props.updatedAt = `加载失败: ${msg}`;
+            renderStage();
+            return;
+        }
+        if (!rawText || !String(rawText).trim()) {
+            component.props.updatedAt = '加载失败: 空响应';
+            renderStage();
+            return;
+        }
+        let result;
+        try {
+            result = JSON.parse(rawText);
+        } catch (e) {
+            component.props.updatedAt = '加载失败: 响应不是 JSON';
+            renderStage();
+            return;
+        }
+        if (result && typeof result === 'object' && result.status === 'error' && result.message) {
+            component.props.updatedAt = `加载失败: ${result.message}`;
+            renderStage();
+            return;
+        }
+        const payload = result && typeof result === 'object' && result.data && typeof result.data === 'object' && !result.current
+            ? result.data
+            : result;
+        if (applyOpenMeteoPayloadToWeatherProps(component.props, payload)) {
+            renderStage();
+            return;
+        }
+        if (payload && typeof payload === 'object') {
+            if (payload.tempC != null) component.props.tempC = String(payload.tempC);
+            if (payload.humidity != null) component.props.humidity = String(payload.humidity);
+            if (payload.windKmh != null) component.props.windKmh = String(payload.windKmh);
+            if (payload.conditionText != null) component.props.conditionText = String(payload.conditionText);
+            if (payload.updatedAt != null) component.props.updatedAt = String(payload.updatedAt);
+        }
+        renderStage();
+    } catch (error) {
+        component.props.updatedAt = `加载失败: ${error && error.message ? error.message : '网络错误'}`;
+        renderStage();
+    } finally {
+        component._weatherFetching = false;
+    }
+}
+
+function tickEditorWeatherSync() {
+    const now = Date.now();
+    for (const c of state.components.values()) {
+        if (c.type !== 'weather' || getWeatherDataMode(c) !== WEATHER_DATA_MODE_API) continue;
+        const intervalMs = getWeatherRefreshInterval(c) * 1000;
+        const last = c._weatherLastFetchAt || 0;
+        if (last > 0 && now - last < intervalMs) continue;
+        syncWeatherFromApiForComponent(c);
+    }
 }
 
 function usesWorkflowSource(type) {
@@ -889,6 +1081,54 @@ function renderSensorMarkup(component, preview = false) {
     `;
 }
 
+function renderWeatherMarkup(component, preview = false) {
+    const mode = getWeatherDataMode(component);
+    const modeLabel = mode === WEATHER_DATA_MODE_API ? '外部 API' : '手动';
+    const lat = Number.isFinite(Number(component.props.latitude)) ? Number(component.props.latitude) : 39.9042;
+    const lon = Number.isFinite(Number(component.props.longitude)) ? Number(component.props.longitude) : 116.4074;
+    const customUrl = typeof component.props.customApiUrl === 'string' ? component.props.customApiUrl.trim() : '';
+    const rootAttrs = preview
+        ? ` data-weather-card="1" data-weather-mode="${escapeHtml(mode)}" data-latitude="${lat}" data-longitude="${lon}" data-custom-api-url="${escapeHtml(customUrl)}" data-refresh-interval="${getWeatherRefreshInterval(component)}"`
+        : '';
+
+    const p = component.props || {};
+    return `
+        <div class="weather-panel"${rootAttrs}>
+            <div class="weather-panel-head">
+                <div>
+                    <div class="weather-panel-eyebrow">Weather</div>
+                    <div class="weather-panel-title" data-field="title">${escapeHtml(p.title || '天气预报')}</div>
+                    <div class="weather-panel-subtitle" data-field="subtitle">${escapeHtml(p.subtitle || '')}</div>
+                </div>
+                <div class="weather-mode-chip">${escapeHtml(modeLabel)}</div>
+            </div>
+            <div class="weather-panel-body">
+                <div class="weather-temp-block">
+                    <span class="weather-temp-value" data-field="tempC">${escapeHtml(String(p.tempC ?? ''))}</span>
+                    <span class="weather-temp-unit">°C</span>
+                </div>
+                <div class="weather-meta-grid">
+                    <div class="weather-meta-item">
+                        <span class="weather-meta-label">天气</span>
+                        <span class="weather-meta-value" data-field="conditionText">${escapeHtml(String(p.conditionText ?? ''))}</span>
+                    </div>
+                    <div class="weather-meta-item">
+                        <span class="weather-meta-label">湿度</span>
+                        <span><span data-field="humidity">${escapeHtml(String(p.humidity ?? ''))}</span>%</span>
+                    </div>
+                    <div class="weather-meta-item">
+                        <span class="weather-meta-label">风速</span>
+                        <span><span data-field="windKmh">${escapeHtml(String(p.windKmh ?? ''))}</span> km/h</span>
+                    </div>
+                </div>
+            </div>
+            <div class="weather-panel-foot">
+                <span data-field="updatedAt">${escapeHtml(String(p.updatedAt ?? ''))}</span>
+            </div>
+        </div>
+    `;
+}
+
 function renderAgricultureComponentMarkup(component, preview = false) {
     if (component.type === 'agri-sensor') return renderSensorMarkup(component, preview);
     return '';
@@ -1172,6 +1412,14 @@ function renderStage() {
             `;
         }
 
+        if (isWeatherComponentType(component.type)) {
+            return `
+                <div class="screen-component weather-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:14px;overflow:hidden;">
+                    ${renderWeatherMarkup(component, false)}
+                </div>
+            `;
+        }
+
         if (isAgricultureComponentType(component.type)) {
             return `
                 <div class="screen-component agriculture-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:14px;overflow:hidden;">
@@ -1440,6 +1688,53 @@ function renderAgricultureDataSourceSection(component) {
     `;
 }
 
+function renderWeatherDataSourceSection(component) {
+    const p = component.props || {};
+    return `
+        <section class="prop-section">
+            <h3>外部天气数据</h3>
+            <div class="prop-grid">
+                <div>
+                    <label class="prop-label" for="weatherTitleInput">标题</label>
+                    <input class="prop-input" id="weatherTitleInput" type="text" value="${escapeHtml(p.title || '')}">
+                </div>
+                <div>
+                    <label class="prop-label" for="weatherSubtitleInput">地点</label>
+                    <input class="prop-input" id="weatherSubtitleInput" type="text" value="${escapeHtml(p.subtitle || '')}" placeholder="如：上海浦东">
+                </div>
+            </div>
+            <div class="prop-grid">
+                <div>
+                    <label class="prop-label" for="weatherDataModeInput">数据模式</label>
+                    <select class="prop-select" id="weatherDataModeInput">
+                        <option value="${SOURCE_MODE_MANUAL}" ${getWeatherDataMode(component) === SOURCE_MODE_MANUAL ? 'selected' : ''}>手动填写</option>
+                        <option value="${WEATHER_DATA_MODE_API}" ${getWeatherDataMode(component) === WEATHER_DATA_MODE_API ? 'selected' : ''}>外部接口</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="prop-label" for="weatherRefreshIntervalInput">刷新间隔(秒)</label>
+                    <input class="prop-input" id="weatherRefreshIntervalInput" type="number" min="${WEATHER_REFRESH_MIN_SEC}" max="${WEATHER_REFRESH_MAX_SEC}" value="${getWeatherRefreshInterval(component)}">
+                </div>
+            </div>
+            <div class="prop-grid">
+                <div>
+                    <label class="prop-label" for="weatherLatitudeInput">纬度</label>
+                    <input class="prop-input" id="weatherLatitudeInput" type="number" step="0.0001" value="${Number.isFinite(Number(component.props.latitude)) ? Number(component.props.latitude) : 39.9042}">
+                </div>
+                <div>
+                    <label class="prop-label" for="weatherLongitudeInput">经度</label>
+                    <input class="prop-input" id="weatherLongitudeInput" type="number" step="0.0001" value="${Number.isFinite(Number(component.props.longitude)) ? Number(component.props.longitude) : 116.4074}">
+                </div>
+            </div>
+            <div>
+                <label class="prop-label" for="weatherCustomApiUrlInput">自定义接口 URL（可选）</label>
+                <input class="prop-input" id="weatherCustomApiUrlInput" type="url" value="${escapeHtml(component.props.customApiUrl || '')}" placeholder="留空则使用 Open-Meteo（根据经纬度）">
+            </div>
+            <p class="prop-hint">外部接口模式下画布会按间隔拉取（与运行预览一致）。<strong>凡填写 Open-Meteo（<code>*.open-meteo.com</code>）任意地址，均改由本机后端带上经纬度转发</strong>，请勿依赖在自定义框里手写完整查询串。非 Open-Meteo 的第三方 URL 需自行带齐参数并允许跨域。刷新间隔最小 ${WEATHER_REFRESH_MIN_SEC} 秒。</p>
+        </section>
+    `;
+}
+
 function renderSensorSettings(component) {
     return `
         <section class="prop-section">
@@ -1473,6 +1768,7 @@ function renderSensorSettings(component) {
 function renderComponentDataSection(component) {
     if (usesWorkflowSource(component.type)) return renderSourceSection(component);
     if (isAgricultureComponentType(component.type)) return renderAgricultureDataSourceSection(component);
+    if (isWeatherComponentType(component.type)) return renderWeatherDataSourceSection(component);
     return '';
 }
 
@@ -1815,6 +2111,69 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
             chartValueColumnInput.addEventListener('change', () => {
                 component.props.valueColumn = chartValueColumnInput.value;
                 renderAll();
+            });
+        }
+        return;
+    }
+
+    if (component.type === 'weather') {
+        const weatherTitleInput = document.getElementById('weatherTitleInput');
+        const weatherSubtitleInput = document.getElementById('weatherSubtitleInput');
+        const weatherDataModeInput = document.getElementById('weatherDataModeInput');
+        const weatherRefreshIntervalInput = document.getElementById('weatherRefreshIntervalInput');
+        const weatherLatitudeInput = document.getElementById('weatherLatitudeInput');
+        const weatherLongitudeInput = document.getElementById('weatherLongitudeInput');
+        const weatherCustomApiUrlInput = document.getElementById('weatherCustomApiUrlInput');
+
+        const bindWeatherText = (el, key) => {
+            if (!el) return;
+            el.addEventListener('input', () => {
+                component.props[key] = el.value;
+                renderStage();
+            });
+        };
+
+        bindWeatherText(weatherTitleInput, 'title');
+        bindWeatherText(weatherSubtitleInput, 'subtitle');
+
+        if (weatherDataModeInput) {
+            weatherDataModeInput.addEventListener('change', () => {
+                component.props.dataMode = weatherDataModeInput.value === WEATHER_DATA_MODE_API ? WEATHER_DATA_MODE_API : SOURCE_MODE_MANUAL;
+                component._weatherLastFetchAt = 0;
+                renderAll();
+                if (getWeatherDataMode(component) === WEATHER_DATA_MODE_API) {
+                    queueMicrotask(() => syncWeatherFromApiForComponent(component));
+                }
+            });
+        }
+        if (weatherRefreshIntervalInput) {
+            weatherRefreshIntervalInput.addEventListener('input', () => {
+                component.props.refreshInterval = clamp(
+                    Number(weatherRefreshIntervalInput.value) || 600,
+                    WEATHER_REFRESH_MIN_SEC,
+                    WEATHER_REFRESH_MAX_SEC
+                );
+                component._weatherLastFetchAt = 0;
+            });
+        }
+        if (weatherLatitudeInput) {
+            weatherLatitudeInput.addEventListener('input', () => {
+                component.props.latitude = Number(weatherLatitudeInput.value);
+                component._weatherLastFetchAt = 0;
+                renderStage();
+            });
+        }
+        if (weatherLongitudeInput) {
+            weatherLongitudeInput.addEventListener('input', () => {
+                component.props.longitude = Number(weatherLongitudeInput.value);
+                component._weatherLastFetchAt = 0;
+                renderStage();
+            });
+        }
+        if (weatherCustomApiUrlInput) {
+            weatherCustomApiUrlInput.addEventListener('input', () => {
+                component.props.customApiUrl = weatherCustomApiUrlInput.value;
+                component._weatherLastFetchAt = 0;
             });
         }
         return;
@@ -2253,7 +2612,19 @@ function bindStageInteractions() {
     });
 }
 
+function resolveBackendOrigin() {
+    const m = document.querySelector('meta[name="ia-backend-origin"]');
+    if (m) {
+        const c = m.getAttribute('content');
+        if (c != null && String(c).trim() !== '') {
+            return String(c).trim().replace(/\/+$/, '');
+        }
+    }
+    return window.location.origin;
+}
+
 function buildPreviewHtml() {
+    const backendOrigin = resolveBackendOrigin();
     const componentHtml = Array.from(state.components.values()).map(component => {
         if (component.type === 'image') {
             const imageState = getImageRenderState(component);
@@ -2281,6 +2652,14 @@ function buildPreviewHtml() {
             return `
                 <div ${previewDataAttrs} style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;background:#fff;padding:12px;">
                     ${chartHtml}
+                </div>
+            `;
+        }
+
+        if (isWeatherComponentType(component.type)) {
+            return `
+                <div style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;padding:14px;">
+                    ${renderWeatherMarkup(component, true)}
                 </div>
             `;
         }
@@ -2509,12 +2888,107 @@ function buildPreviewHtml() {
             text-align: right;
             word-break: break-word;
         }
+        .weather-panel {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 14px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(56, 189, 248, 0.22);
+            background: linear-gradient(155deg, rgba(15, 23, 42, 0.97), rgba(30, 58, 95, 0.94));
+            color: #f0f9ff;
+            box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.08);
+            overflow: hidden;
+        }
+        .weather-panel-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .weather-panel-eyebrow {
+            color: rgba(125, 211, 252, 0.85);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .weather-panel-title {
+            font-size: 20px;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .weather-panel-subtitle {
+            margin-top: 4px;
+            font-size: 13px;
+            color: rgba(224, 242, 254, 0.82);
+        }
+        .weather-mode-chip {
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(56, 189, 248, 0.16);
+            color: #bae6fd;
+            font-size: 11px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .weather-panel-body {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px 24px;
+            flex: 1;
+            min-height: 0;
+        }
+        .weather-temp-block {
+            display: flex;
+            align-items: flex-start;
+            gap: 2px;
+        }
+        .weather-temp-value {
+            font-size: 44px;
+            font-weight: 800;
+            line-height: 1;
+            letter-spacing: -0.02em;
+        }
+        .weather-temp-unit {
+            font-size: 18px;
+            font-weight: 700;
+            margin-top: 6px;
+            color: rgba(224, 242, 254, 0.75);
+        }
+        .weather-meta-grid {
+            display: grid;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .weather-meta-item {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+        }
+        .weather-meta-label {
+            color: rgba(186, 230, 253, 0.65);
+            min-width: 36px;
+        }
+        .weather-meta-value {
+            font-weight: 700;
+        }
+        .weather-panel-foot {
+            margin-top: auto;
+            font-size: 11px;
+            color: rgba(224, 242, 254, 0.72);
+        }
     </style>
 </head>
 <body>
     <div class="screen-page">${componentHtml}</div>
     <script>
-        const AGRI_API_ORIGIN = ${JSON.stringify(window.location.origin)};
+        const AGRI_API_ORIGIN = ${JSON.stringify(backendOrigin)};
+        const WEATHER_FORECAST_ENDPOINT = ${JSON.stringify(`${backendOrigin}/api/weather/forecast`)};
 
         function getStatusTone(value) {
             const text = String(value || '').trim().toLowerCase();
@@ -2560,6 +3034,145 @@ function buildPreviewHtml() {
             const seconds = Math.max(5, Number(card.getAttribute('data-refresh-interval')) || 30);
             window.setInterval(() => refreshAgricultureCard(card), seconds * 1000);
         });
+
+        function setWeatherField(root, field, value) {
+            const target = root.querySelector('[data-field="' + field + '"]');
+            if (!target) return;
+            target.textContent = value == null ? '' : String(value);
+        }
+
+        function wmoWeatherLabel(code) {
+            const c = Number(code);
+            const map = {
+                0: '晴', 1: '大部晴朗', 2: '多云', 3: '阴', 45: '雾', 48: '雾',
+                51: '小毛毛雨', 53: '毛毛雨', 55: '大毛毛雨', 56: '冻毛毛雨', 57: '冻毛毛雨',
+                61: '小雨', 63: '中雨', 65: '大雨', 66: '冻雨', 67: '冻雨',
+                71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
+                80: '阵雨', 81: '强阵雨', 82: '暴雨', 85: '阵雪', 86: '阵雪',
+                95: '雷暴', 96: '雷暴伴冰雹', 99: '强雷暴伴冰雹'
+            };
+            if (!Number.isFinite(c)) return '—';
+            return map[c] || '天气';
+        }
+
+        function formatWeatherNumber(value, digits) {
+            if (value == null || !Number.isFinite(Number(value))) return '—';
+            const n = Number(value);
+            const d = Number.isFinite(digits) ? digits : 1;
+            return String(Math.round(n * Math.pow(10, d)) / Math.pow(10, d));
+        }
+
+        function applyWeatherObject(root, obj) {
+            if (!obj || typeof obj !== 'object') return;
+            if (obj.title != null) setWeatherField(root, 'title', obj.title);
+            if (obj.subtitle != null) setWeatherField(root, 'subtitle', obj.subtitle);
+            if (obj.conditionText != null) setWeatherField(root, 'conditionText', obj.conditionText);
+            if (obj.tempC != null) setWeatherField(root, 'tempC', obj.tempC);
+            if (obj.humidity != null) setWeatherField(root, 'humidity', obj.humidity);
+            if (obj.windKmh != null) setWeatherField(root, 'windKmh', obj.windKmh);
+            if (obj.updatedAt != null) setWeatherField(root, 'updatedAt', obj.updatedAt);
+        }
+
+        function applyOpenMeteoPayload(root, json) {
+            const current = json && json.current && typeof json.current === 'object' ? json.current : null;
+            if (!current) return false;
+            setWeatherField(root, 'tempC', formatWeatherNumber(current.temperature_2m, 1));
+            setWeatherField(root, 'humidity', formatWeatherNumber(current.relative_humidity_2m, 0));
+            setWeatherField(root, 'windKmh', formatWeatherNumber(current.wind_speed_10m, 1));
+            setWeatherField(root, 'conditionText', wmoWeatherLabel(current.weather_code));
+            const t = current.time ? String(current.time) : '';
+            setWeatherField(root, 'updatedAt', t ? ('观测时间 ' + t) : '已更新');
+            return true;
+        }
+
+        async function refreshWeatherCard(root) {
+            if (root.getAttribute('data-weather-mode') !== 'api') return;
+            const custom = (root.getAttribute('data-custom-api-url') || '').trim();
+            const rawLat = Number(root.getAttribute('data-latitude'));
+            const rawLon = Number(root.getAttribute('data-longitude'));
+            const lat = Number.isFinite(rawLat) ? rawLat : 30.5928;
+            const lon = Number.isFinite(rawLon) ? rawLon : 114.3055;
+
+            let url = '';
+            try {
+                function openMeteoNeedsProxy(c) {
+                    if (!c) return true;
+                    try {
+                        const u = new URL(c);
+                        return /open-meteo\\.com$/i.test(u.hostname.replace(/^www\\./, ''));
+                    } catch (e) {
+                        return true;
+                    }
+                }
+                if (custom && !openMeteoNeedsProxy(custom)) {
+                    const abs = custom.startsWith('http://') || custom.startsWith('https://');
+                    url = abs ? custom : new URL(custom, AGRI_API_ORIGIN).toString();
+                } else {
+                    const base = String(WEATHER_FORECAST_ENDPOINT || '').replace(/\\/+$/, '');
+                    const qs = new URLSearchParams();
+                    qs.set('latitude', String(lat));
+                    qs.set('longitude', String(lon));
+                    url = base + '?' + qs.toString();
+                }
+
+                const response = await fetch(url, { cache: 'no-store' });
+                const rawText = await response.text();
+
+                function parseJsonFromText(text, label) {
+                    const t = String(text || '').trim();
+                    if (!t) {
+                        throw new Error('接口返回空内容（HTTP ' + label + '）');
+                    }
+                    try {
+                        return JSON.parse(t);
+                    } catch (e) {
+                        throw new Error('响应不是有效 JSON（HTTP ' + label + '）');
+                    }
+                }
+
+                if (!response.ok) {
+                    let msg = String(response.status);
+                    try {
+                        const errJson = JSON.parse(rawText);
+                        if (errJson && errJson.message != null) msg = String(errJson.message);
+                        else if (errJson && errJson.error != null) msg = String(errJson.error);
+                    } catch (e) {
+                        if (rawText && rawText.length < 200) msg = msg + ': ' + rawText;
+                    }
+                    setWeatherField(root, 'updatedAt', '加载失败: ' + msg);
+                    return;
+                }
+
+                let result;
+                try {
+                    result = parseJsonFromText(rawText, String(response.status));
+                } catch (e) {
+                    setWeatherField(root, 'updatedAt', '加载失败: ' + (e && e.message ? e.message : '解析失败'));
+                    return;
+                }
+                if (result && typeof result === 'object' && result.status === 'error' && result.message) {
+                    setWeatherField(root, 'updatedAt', '加载失败: ' + String(result.message));
+                    return;
+                }
+                const payload = result && typeof result === 'object' && result.data && typeof result.data === 'object' && !result.current
+                    ? result.data
+                    : result;
+                if (!payload || typeof payload !== 'object') return;
+
+                if (applyOpenMeteoPayload(root, payload)) return;
+                applyWeatherObject(root, payload);
+            } catch (error) {
+                console.warn('天气组件接口刷新失败', url, error);
+                setWeatherField(root, 'updatedAt', '加载失败: ' + (error && error.message ? error.message : '网络错误'));
+            }
+        }
+
+        const weatherCards = Array.from(document.querySelectorAll('[data-weather-card][data-weather-mode="api"]'));
+        weatherCards.forEach(card => {
+            refreshWeatherCard(card);
+            const seconds = Math.max(10, Number(card.getAttribute('data-refresh-interval')) || 600);
+            window.setInterval(() => refreshWeatherCard(card), seconds * 1000);
+        });
     </script>
 </body>
 </html>`;
@@ -2567,10 +3180,14 @@ function buildPreviewHtml() {
 
 function runPreview() {
     const html = buildPreviewHtml();
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    const previewWindow = window.open();
+    if (!previewWindow) {
+        window.alert('请允许本页弹出窗口以预览大屏。');
+        return;
+    }
+    previewWindow.document.open();
+    previewWindow.document.write(html);
+    previewWindow.document.close();
 }
 
 function readFileAsDataUrl(file) {
@@ -2647,10 +3264,17 @@ function seedDemoProject() {
     chart.height = 180;
     chart.props.csvText = '指标,数值\n温度,24.6\n湿度,68\n光照,18500\n土壤湿度,45';
 
+    const weather = createWeatherComponent(520, 72);
+    weather.width = 360;
+    weather.height = 220;
+    weather.props.dataMode = WEATHER_DATA_MODE_API;
+    weather.props.subtitle = '北京（示例 · Open-Meteo）';
+
     state.components.set(title.id, title);
     state.components.set(subtitle.id, subtitle);
     state.components.set(sensor.id, sensor);
     state.components.set(chart.id, chart);
+    state.components.set(weather.id, weather);
 }
 
 function initializeProject() {
@@ -2710,6 +3334,7 @@ function init() {
     bindStageInteractions();
     bindTopbarActions();
     bindExternalRefresh();
+    window.setInterval(tickEditorWeatherSync, 1000);
     renderAll();
 }
 
