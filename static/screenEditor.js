@@ -230,6 +230,8 @@ function createImageComponent(x, y) {
             alt: '图片展示组件',
             objectFit: 'cover',
             borderRadius: 20,
+            autoRefresh: false,
+            refreshInterval: 5,
             source: createDefaultSource()
         }
     };
@@ -595,7 +597,12 @@ function getImageRenderState(component) {
     }
 
     if (component.props.src) {
-        return { kind: 'image', src: component.props.src };
+        const refreshEnabled = component.props.autoRefresh === true;
+        const refreshSeconds = clamp(Number(component.props.refreshInterval) || 5, 1, 3600);
+        const src = refreshEnabled
+            ? appendTimestampQuery(String(component.props.src), '__ts', Date.now())
+            : component.props.src;
+        return { kind: 'image', src, autoRefresh: refreshEnabled, refreshInterval: refreshSeconds };
     }
 
     return {
@@ -1308,6 +1315,8 @@ function renderTextSettings(component) {
 
 function renderImageSettings(component) {
     const source = normalizeSource(component.props.source);
+    const refreshEnabled = component.props.autoRefresh === true;
+    const refreshInterval = clamp(Number(component.props.refreshInterval) || 5, 1, 3600);
 
     return `
         <section class="prop-section">
@@ -1317,6 +1326,24 @@ function renderImageSettings(component) {
                     <label class="prop-label" for="imageUploadInput">上传图片</label>
                     <input class="prop-input" id="imageUploadInput" type="file" accept="image/*">
                 </div>
+                <div>
+                    <label class="prop-label" for="imageSrcInput">图片地址</label>
+                    <input class="prop-input" id="imageSrcInput" type="text" value="${escapeHtml(component.props.src || '')}" placeholder="/api/agriculture/camera/snapshot">
+                </div>
+                <div class="prop-grid">
+                    <div>
+                        <label class="prop-label" for="imageAutoRefreshInput">定时抓拍</label>
+                        <select class="prop-select" id="imageAutoRefreshInput">
+                            <option value="false" ${refreshEnabled ? '' : 'selected'}>关闭</option>
+                            <option value="true" ${refreshEnabled ? 'selected' : ''}>开启</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="prop-label" for="imageRefreshIntervalInput">抓拍间隔(秒)</label>
+                        <input class="prop-input" id="imageRefreshIntervalInput" type="number" min="1" max="3600" value="${refreshInterval}">
+                    </div>
+                </div>
+                <p class="prop-hint">把图片地址设置为本地接口，例如 /api/agriculture/camera/snapshot，开启后会自动追加时间戳参数定时刷新。</p>
             ` : `
                 <p class="prop-hint">当前图片来自工作流端口，端口值会在运行生成网页时作为图片 URL 或 Base64 地址使用。</p>
             `}
@@ -1338,7 +1365,7 @@ function renderImageSettings(component) {
                     <input class="prop-input" id="imageRadiusInput" type="number" min="0" max="80" value="${Number(component.props.borderRadius) || 0}">
                 </div>
             </div>
-            ${source.mode === SOURCE_MODE_MANUAL && component.props.src ? `<img class="preview-thumb" src="${component.props.src}" alt="${escapeHtml(component.props.alt || '')}">` : ''}
+            ${source.mode === SOURCE_MODE_MANUAL && component.props.src ? `<img class="preview-thumb" src="${appendTimestampQuery(component.props.src, '__preview', Date.now())}" alt="${escapeHtml(component.props.alt || '')}">` : ''}
         </section>
     `;
 }
@@ -1882,6 +1909,9 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
     }
 
     const uploadInput = document.getElementById('imageUploadInput');
+    const srcInput = document.getElementById('imageSrcInput');
+    const autoRefreshInput = document.getElementById('imageAutoRefreshInput');
+    const refreshIntervalInput = document.getElementById('imageRefreshIntervalInput');
     const altInput = document.getElementById('imageAltInput');
     const fitInput = document.getElementById('imageFitInput');
     const radiusInput = document.getElementById('imageRadiusInput');
@@ -1891,7 +1921,25 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
             const [file] = uploadInput.files || [];
             if (!file) return;
             component.props.src = await readFileAsDataUrl(file);
+            component.props.autoRefresh = false;
             renderAll();
+        });
+    }
+    if (srcInput) {
+        srcInput.addEventListener('input', () => {
+            component.props.src = srcInput.value.trim();
+            renderStage();
+        });
+    }
+    if (autoRefreshInput) {
+        autoRefreshInput.addEventListener('change', () => {
+            component.props.autoRefresh = autoRefreshInput.value === 'true';
+            renderAll();
+        });
+    }
+    if (refreshIntervalInput) {
+        refreshIntervalInput.addEventListener('input', () => {
+            component.props.refreshInterval = clamp(Number(refreshIntervalInput.value) || 5, 1, 3600);
         });
     }
     if (altInput) {
@@ -2258,8 +2306,14 @@ function buildPreviewHtml() {
         if (component.type === 'image') {
             const imageState = getImageRenderState(component);
             const previewDataAttrs = getPreviewDataAttributes(component);
+            const previewBaseSrc = component.props.src ? toAbsoluteUrl(component.props.src) : '';
+            const previewImageSrc = imageState.kind === 'image' ? toAbsoluteUrl(imageState.src) : '';
+            const refreshAttrs = imageState.autoRefresh ? ` data-image-refresh="${imageState.refreshInterval}" data-image-base-src="${escapeHtml(previewBaseSrc)}"` : '';
+            const captureBadge = imageState.autoRefresh
+                ? `<div data-capture-time-badge style="position:absolute;right:12px;bottom:12px;padding:6px 10px;border-radius:999px;background:rgba(15,23,42,0.72);backdrop-filter:blur(8px);color:#f8fafc;font:600 12px/1.2 'Segoe UI',sans-serif;letter-spacing:0.02em;box-shadow:0 10px 24px rgba(15,23,42,0.22);pointer-events:none;">当前抓拍时间 --:--:--</div>`
+                : '';
             const imageContent = imageState.kind === 'image'
-                ? `<img src="${escapeHtml(imageState.src)}" alt="${escapeHtml(component.props.alt || '')}" style="width:100%;height:100%;object-fit:${escapeHtml(component.props.objectFit || 'cover')};border-radius:${Number(component.props.borderRadius) || 0}px;">`
+                ? `<img src="${escapeHtml(previewImageSrc)}" alt="${escapeHtml(component.props.alt || '')}"${refreshAttrs} style="width:100%;height:100%;object-fit:${escapeHtml(component.props.objectFit || 'cover')};border-radius:${Number(component.props.borderRadius) || 0}px;">${captureBadge}`
                 : `
                     <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:18px;background:linear-gradient(145deg,#edf4f8 0%,#e4edf4 100%);color:#66788a;text-align:center;font:16px/1.6 Segoe UI,sans-serif;">
                         <div>
@@ -2516,6 +2570,13 @@ function buildPreviewHtml() {
     <script>
         const AGRI_API_ORIGIN = ${JSON.stringify(window.location.origin)};
 
+        function appendPreviewTimestamp(url, key = '__ts', value = Date.now()) {
+            const text = String(url || '').trim();
+            if (!text) return '';
+            const joiner = text.includes('?') ? '&' : '?';
+            return text + joiner + encodeURIComponent(key) + '=' + encodeURIComponent(String(value));
+        }
+
         function getStatusTone(value) {
             const text = String(value || '').trim().toLowerCase();
             if (!text) return 'neutral';
@@ -2554,6 +2615,29 @@ function buildPreviewHtml() {
             }
         }
 
+        function refreshSnapshotImage(image) {
+            const baseSrc = image.getAttribute('data-image-base-src') || '';
+            const refreshSeconds = Math.max(1, Number(image.getAttribute('data-image-refresh')) || 5);
+            if (!baseSrc) return;
+            const container = image.parentElement;
+            const badge = container ? container.querySelector('[data-capture-time-badge]') : null;
+            const updateBadge = () => {
+                if (!badge) return;
+                const stamp = new Date();
+                badge.textContent = '当前抓拍时间 ' + stamp.toLocaleTimeString('zh-CN', { hour12: false });
+            };
+            const nextSrc = () => new URL(appendPreviewTimestamp(baseSrc, '__ts', Date.now()), AGRI_API_ORIGIN).toString();
+            image.src = nextSrc();
+            updateBadge();
+            window.setInterval(() => {
+                image.src = nextSrc();
+                updateBadge();
+            }, refreshSeconds * 1000);
+        }
+
+        const snapshotImages = Array.from(document.querySelectorAll('[data-image-refresh][data-image-base-src]'));
+        snapshotImages.forEach(refreshSnapshotImage);
+
         const agriCards = Array.from(document.querySelectorAll('[data-agri-component][data-agri-mode="api"]'));
         agriCards.forEach(card => {
             refreshAgricultureCard(card);
@@ -2571,6 +2655,20 @@ function runPreview() {
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank', 'noopener');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function appendTimestampQuery(url, key = '__ts', value = Date.now()) {
+    const text = String(url || '').trim();
+    if (!text) return '';
+    const joiner = text.includes('?') ? '&' : '?';
+    return `${text}${joiner}${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
+}
+
+function toAbsoluteUrl(url) {
+    const text = String(url || '').trim();
+    if (!text) return '';
+    if (text.startsWith('data:')) return text;
+    return new URL(text, window.location.origin).toString();
 }
 
 function readFileAsDataUrl(file) {

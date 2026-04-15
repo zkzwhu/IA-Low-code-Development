@@ -1,0 +1,9 @@
+{
+  "broker_ip": "u0114811.ala.cn-hangzhou.emqxsl.cn",
+  "broker_port": 8883,
+  "username": "smart_agri_client",
+  "password": "SmartAgri@2026",
+  "topic": "$oc/devices/SmartAgriculture_thermometer/sys/properties/report",
+  "client_id": "ia-lowcode-app-01",
+  "use_tls": true
+}

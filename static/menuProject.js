@@ -77,7 +77,7 @@ function getDerivedPortType(nodeId, field, fallbackType = 'string') {
         const variable = getWorkflowVariableById(node.properties?.variableId);
         if (variable) return variable.dataType;
     }
-    return fallbackType === 'int' ? 'int' : 'string';
+    return fallbackType === 'int' ? 'int' : (fallbackType === 'csv' ? 'csv' : 'string');
 }
 
 function syncNodeVariableReferences(validVariableIds) {
@@ -137,6 +137,7 @@ function renderWorkflowPortsEditor(modalBody, draftPorts) {
                             <label class="prop-label">数据类型</label>
                             <select class="prop-select" data-port-field="dataType" data-port-id="${port.id}">
                                 <option value="string" ${port.dataType === 'string' ? 'selected' : ''}>字符串</option>
+                                <option value="csv" ${port.dataType === 'csv' ? 'selected' : ''}>CSV</option>
                                 <option value="int" ${port.dataType === 'int' ? 'selected' : ''}>整型</option>
                             </select>
                         </div>
@@ -240,7 +241,7 @@ function openWorkflowPortsManager() {
     const draftPorts = (state.workflowPorts || []).map(port => ({
         id: String(port.id || createWorkflowPortId()),
         name: String(port.name || ''),
-        dataType: port.dataType === 'int' ? 'int' : 'string',
+        dataType: port.dataType === 'int' ? 'int' : (port.dataType === 'csv' ? 'csv' : 'string'),
         nodeId: Number.isFinite(Number(port.nodeId)) ? Number(port.nodeId) : null,
         field: typeof port.field === 'string' ? port.field : ''
     }));
@@ -277,7 +278,7 @@ function openWorkflowPortsManager() {
 function renderWorkflowVariablesEditor(modalBody, draftVariables) {
     modalBody.innerHTML = `
         <div class="port-editor-toolbar">
-            <div class="help-text">变量可被打印节点和输出端口节点引用，支持整型与字符串。</div>
+            <div class="help-text">变量可被打印节点和输出端口节点引用，支持字符串、CSV 与整型。</div>
             <button class="prop-btn" type="button" id="addWorkflowVariableRowBtn">添加变量</button>
         </div>
         <div class="port-editor-list">
@@ -296,6 +297,7 @@ function renderWorkflowVariablesEditor(modalBody, draftVariables) {
                             <label class="prop-label">数据类型</label>
                             <select class="prop-select" data-variable-field="dataType" data-variable-id="${variable.id}">
                                 <option value="string" ${variable.dataType === 'string' ? 'selected' : ''}>字符串</option>
+                                <option value="csv" ${variable.dataType === 'csv' ? 'selected' : ''}>CSV</option>
                                 <option value="int" ${variable.dataType === 'int' ? 'selected' : ''}>整型</option>
                             </select>
                         </div>
@@ -313,7 +315,7 @@ function renderWorkflowVariablesEditor(modalBody, draftVariables) {
         const target = draftVariables.find(variable => variable.id === variableId);
         if (!target) return;
         if (field === 'dataType') {
-            target.dataType = value === 'int' ? 'int' : 'string';
+            target.dataType = value === 'int' ? 'int' : (value === 'csv' ? 'csv' : 'string');
             target.defaultValue = target.dataType === 'int'
                 ? (Number.isFinite(Number(target.defaultValue)) ? Number(target.defaultValue) : 0)
                 : String(target.defaultValue ?? '');
@@ -382,7 +384,7 @@ function openWorkflowVariablesManager() {
     const draftVariables = (state.workflowVariables || []).map(variable => ({
         id: String(variable.id || createWorkflowVariableId()),
         name: String(variable.name || ''),
-        dataType: variable.dataType === 'int' ? 'int' : 'string',
+        dataType: variable.dataType === 'int' ? 'int' : (variable.dataType === 'csv' ? 'csv' : 'string'),
         defaultValue: variable.dataType === 'int'
             ? (Number.isFinite(Number(variable.defaultValue)) ? Number(variable.defaultValue) : 0)
             : String(variable.defaultValue ?? '')

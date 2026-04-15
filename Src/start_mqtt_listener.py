@@ -1,11 +1,36 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
+from pathlib import Path
+from typing import Any
 
 from database import SensorDatabase
 from mqtt_handler import MQTTHandler
+
+
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "mqtt_cloud.json"
+DEFAULT_CONFIG = {
+    "broker_ip": "u0114811.ala.cn-hangzhou.emqxsl.cn",
+    "broker_port": 8883,
+    "username": "smart_agri_client",
+    "password": "SmartAgri@2026",
+    "topic": "$oc/devices/SmartAgriculture_thermometer/sys/properties/report",
+    "client_id": "ia-lowcode-app-01",
+    "use_tls": True,
+}
+
+
+def load_mqtt_config() -> dict[str, Any]:
+    config = dict(DEFAULT_CONFIG)
+    if CONFIG_PATH.exists():
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
+            file_config = json.load(f)
+        if isinstance(file_config, dict):
+            config.update({k: v for k, v in file_config.items() if v is not None})
+    return config
 
 
 def env_int(name: str, default: int) -> int:
@@ -15,16 +40,24 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = str(os.getenv(name, str(default))).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def create_mqtt_listener() -> tuple[SensorDatabase, MQTTHandler]:
+    mqtt_config = load_mqtt_config()
     db = SensorDatabase(db_path=os.getenv("SENSOR_DB_PATH") or None)
     handler = MQTTHandler(
-        broker_ip=os.getenv("MQTT_BROKER_IP") or None,
-        port=env_int("MQTT_BROKER_PORT", 1883),
+        broker_ip=os.getenv("MQTT_BROKER_IP", str(mqtt_config["broker_ip"])) or str(mqtt_config["broker_ip"]),
+        port=env_int("MQTT_BROKER_PORT", int(mqtt_config["broker_port"])),
         db_instance=db,
+        username=os.getenv("MQTT_USERNAME", str(mqtt_config["username"])) or str(mqtt_config["username"]),
+        password=os.getenv("MQTT_PASSWORD", str(mqtt_config["password"])) or str(mqtt_config["password"]),
+        topic=os.getenv("MQTT_TOPIC", str(mqtt_config["topic"])) or str(mqtt_config["topic"]),
+        client_id=os.getenv("MQTT_CLIENT_ID", str(mqtt_config["client_id"])) or str(mqtt_config["client_id"]),
+        use_tls=env_bool("MQTT_USE_TLS", bool(mqtt_config["use_tls"])),
     )
-    topic = os.getenv("MQTT_TOPIC")
-    if topic:
-        handler.topic = topic
     return db, handler
 
 

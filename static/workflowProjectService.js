@@ -28,7 +28,7 @@ function buildPortId(index = 0) {
 }
 
 export function normalizeWorkflowVariable(variable, index = 0) {
-    const dataType = variable?.dataType === 'int' ? 'int' : 'string';
+    const dataType = variable?.dataType === 'int' ? 'int' : (variable?.dataType === 'csv' ? 'csv' : 'string');
     const defaultValue = dataType === 'int'
         ? (Number.isFinite(Number(variable?.defaultValue)) ? Number(variable.defaultValue) : 0)
         : String(variable?.defaultValue ?? '');
@@ -57,14 +57,14 @@ function derivePortDataType(port) {
         const variable = getOutputVariableForNodeId(port?.nodeId);
         if (variable) return variable.dataType;
     }
-    return port?.dataType === 'int' ? 'int' : 'string';
+    return port?.dataType === 'int' ? 'int' : (port?.dataType === 'csv' ? 'csv' : 'string');
 }
 
 export function normalizeWorkflowPort(port, index = 0) {
     const normalized = {
         id: String(port?.id || buildPortId(index)),
         name: String(port?.name || `端口${index + 1}`),
-        dataType: port?.dataType === 'int' ? 'int' : 'string',
+        dataType: port?.dataType === 'int' ? 'int' : (port?.dataType === 'csv' ? 'csv' : 'string'),
         nodeId: Number.isFinite(Number(port?.nodeId)) ? Number(port.nodeId) : null,
         field: typeof port?.field === 'string' ? port.field : ''
     };

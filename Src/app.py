@@ -5,8 +5,12 @@ import json
 from atexit import register
 from typing import Any
 
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = None
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 from debug_runtime import create_session, serialize_state, step_once
 from database import SensorDatabase
@@ -30,6 +34,7 @@ debug_sessions: dict[str, dict[str, Any]] = {}
 sensor_db = SensorDatabase()
 mqtt_db: SensorDatabase | None = None
 mqtt_handler = None
+camera_capture = None
 
 
 def start_app_mqtt() -> None:
@@ -48,6 +53,16 @@ def stop_app_mqtt() -> None:
 
 
 register(stop_app_mqtt)
+
+
+def stop_camera_capture() -> None:
+    global camera_capture
+    if camera_capture is not None:
+        camera_capture.release()
+        camera_capture = None
+
+
+register(stop_camera_capture)
 
 smart_agriculture_mock_data = {
     'sensor': {
@@ -70,7 +85,6 @@ def build_smart_agriculture_payload() -> dict[str, dict[str, Any]]:
     }
 
 
-
 def safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -81,6 +95,28 @@ def safe_int(value: Any, default: int = 0) -> int:
 
 
 
+def get_camera_capture(index: int = 0):
+    global camera_capture
+    if cv2 is None:
+        raise RuntimeError('未安装 opencv-python，请先执行 pip install opencv-python')
+    if camera_capture is None or not camera_capture.isOpened():
+        camera_capture = cv2.VideoCapture(index)
+    if camera_capture is None or not camera_capture.isOpened():
+        raise RuntimeError('无法打开本地摄像头，请检查摄像头是否被其他程序占用')
+    return camera_capture
+
+
+def capture_snapshot_bytes() -> bytes:
+    capture = get_camera_capture(safe_int(os.getenv('CAMERA_INDEX'), 0))
+    ok, frame = capture.read()
+    if not ok or frame is None:
+        raise RuntimeError('本地摄像头抓拍失败')
+    ok, encoded = cv2.imencode('.jpg', frame)
+    if not ok:
+        raise RuntimeError('摄像头图片编码失败')
+    return encoded.tobytes()
+
+
 def node_name(node: dict[str, Any]) -> str:
     props = node.get('properties', {}) or {}
     return props.get('name') or f"{node.get('type', 'node')}#{node.get('id')}"
@@ -89,7 +125,8 @@ def node_name(node: dict[str, Any]) -> str:
 def normalize_variable_defs(variable_defs: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     normalized = []
     for index, variable in enumerate(variable_defs or []):
-        data_type = 'int' if variable.get('dataType') == 'int' else 'string'
+        raw_data_type = variable.get('dataType')
+        data_type = 'int' if raw_data_type == 'int' else ('csv' if raw_data_type == 'csv' else 'string')
         default_value = safe_int(variable.get('defaultValue'), 0) if data_type == 'int' else str(variable.get('defaultValue', ''))
         normalized.append({
             'id': str(variable.get('id') or f'workflow-variable-{index}'),
@@ -121,12 +158,27 @@ def resolve_variable_value(variable_id: str | None, variable_values: dict[str, A
     return '' if value is None else str(value)
 
 
+def to_csv_text(raw_value: Any) -> str:
+    if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
+        headers = list(raw_value[0].keys())
+        rows = [','.join(str(row.get(key, '')) for key in headers) for row in raw_value]
+        return ','.join(headers) + ('\n' + '\n'.join(rows) if rows else '')
+    if isinstance(raw_value, dict):
+        headers = list(raw_value.keys())
+        return ','.join(headers) + ('\n' + ','.join(str(raw_value.get(key, '')) for key in headers) if headers else '')
+    return '' if raw_value is None else str(raw_value)
+
+
 def assign_variable_value(variable_id: str | None, raw_value: Any, variable_values: dict[str, Any], variable_defs_by_id: dict[str, dict[str, Any]]) -> tuple[bool, Any]:
     variable = variable_defs_by_id.get(str(variable_id)) if variable_id else None
     if not variable:
         return False, raw_value
     if variable.get('dataType') == 'int':
         converted = safe_int(raw_value, safe_int(variable.get('defaultValue'), 0))
+        variable_values[variable['id']] = converted
+        return True, converted
+    if variable.get('dataType') == 'csv':
+        converted = to_csv_text(raw_value)
         variable_values[variable['id']] = converted
         return True, converted
     if isinstance(raw_value, (dict, list)):
@@ -174,6 +226,24 @@ def get_agriculture_dashboard():
 @app.route('/api/agriculture/sensor', methods=['GET'])
 def get_agriculture_sensor():
     return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()['sensor']})
+
+
+@app.route('/api/agriculture/camera/snapshot', methods=['GET'])
+def get_agriculture_camera_snapshot():
+    try:
+        image_bytes = capture_snapshot_bytes()
+    except RuntimeError as error:
+        return jsonify({'status': 'error', 'message': str(error)}), 500
+
+    return Response(
+        image_bytes,
+        mimetype='image/jpeg',
+        headers={
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        },
+    )
 
 
 @app.route('/api/agriculture/mock/update', methods=['POST'])
@@ -458,4 +528,4 @@ def debug_stop():
 if __name__ == '__main__':
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         start_app_mqtt()
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
