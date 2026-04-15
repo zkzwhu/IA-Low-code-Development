@@ -2,10 +2,6 @@ from __future__ import annotations
 
 import os
 import json
-import math
-import urllib.error
-import urllib.parse
-import urllib.request
 from atexit import register
 from typing import Any
 
@@ -220,70 +216,6 @@ def workflow_editor():
 @app.route('/screen-editor')
 def screen_editor():
     return render_template('screen_editor.html')
-
-
-OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
-
-
-def _parse_query_float(name: str) -> float | None:
-    """解析查询参数中的经纬度；避免 Werkzeug type=float 对部分字符串返回 None 导致误报 400。"""
-    raw = request.args.get(name)
-    if raw is None:
-        return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    try:
-        v = float(s.replace(',', '.'))
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if math.isnan(v) or math.isinf(v):
-        return None
-    return v
-
-
-@app.route('/api/weather/forecast', methods=['GET'])
-def proxy_open_meteo_forecast():
-    """同源代理：预览页与编辑器使用 document.write 后 fetch 本接口，避免 blob: 页直连外网异常。"""
-    lat = _parse_query_float('latitude')
-    lon = _parse_query_float('longitude')
-    if lat is None or lon is None:
-        return jsonify({
-            'status': 'error',
-            'message': '缺少或无法解析 latitude、longitude（需为数字，例如 ?latitude=30.6&longitude=114.3）',
-        }), 400
-    lat = max(-90.0, min(90.0, lat))
-    lon = max(-180.0, min(180.0, lon))
-
-    params = urllib.parse.urlencode({
-        'latitude': lat,
-        'longitude': lon,
-        'current': 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m',
-        'timezone': 'auto',
-    })
-    upstream = f'{OPEN_METEO_FORECAST_URL}?{params}'
-    try:
-        req = urllib.request.Request(
-            upstream,
-            headers={
-                'User-Agent': 'IA-Low-code-Development/1.0',
-                'Accept-Encoding': 'identity',
-            },
-            method='GET',
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read()
-            if not body or not body.strip():
-                return jsonify({'status': 'error', 'message': '上游天气接口返回空内容'}), 502
-            return Response(
-                body,
-                mimetype='application/json',
-                headers={'Cache-Control': 'no-store'},
-            )
-    except urllib.error.HTTPError as exc:
-        return jsonify({'status': 'error', 'message': f'上游 HTTP {exc.code}'}), 502
-    except Exception as exc:
-        return jsonify({'status': 'error', 'message': str(exc)}), 502
 
 
 @app.route('/api/agriculture/dashboard', methods=['GET'])

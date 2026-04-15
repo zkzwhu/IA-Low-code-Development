@@ -6,7 +6,6 @@ const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const SOURCE_MODE_MANUAL = 'manual';
 const SOURCE_MODE_WORKFLOW_PORT = 'workflow-port';
 const AGRI_DATA_MODE_API = 'api';
-const WEATHER_DATA_MODE_API = 'api';
 const DEFAULT_PAGE = { width: 1440, height: 900, background: '#f5f7fb' };
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
@@ -25,34 +24,16 @@ const COMPONENT_LIBRARY = [
         description: '上传图片，或绑定已有工作流中的字符串端口作为图片地址。'
     },
     {
-        type: 'chart-bar',
+        type: 'chart',
         icon: '📊',
-        title: '柱状图表',
-        description: '导入 CSV 数据并显示为柱状图。'
-    },
-    {
-        type: 'chart-line',
-        icon: '📈',
-        title: '折线图表',
-        description: '导入 CSV 数据并显示为折线图。'
-    },
-    {
-        type: 'chart-pie',
-        icon: '🥧',
-        title: '饼图表',
-        description: '导入 CSV 数据并显示为饼图。'
+        title: '图表展示',
+        description: '导入 CSV 数据并显示为饼图、折线图或柱状图。'
     },
     {
         type: 'agri-sensor',
         icon: '📏',
         title: '传感器数据',
         description: '展示各类传感器的数据，包括温度、湿度、光照等。'
-    },
-    {
-        type: 'weather',
-        icon: '🌤️',
-        title: '天气信息',
-        description: '通过 Open-Meteo 或自定义接口获取实时天气并展示在大屏上。'
     }
 ];
 
@@ -62,8 +43,7 @@ const state = {
     selectedId: null,
     selectedIds: new Set(),
     page: { ...DEFAULT_PAGE },
-    zoom: 1,
-    resizeMode: false
+    zoom: 1
 };
 
 const refs = {
@@ -83,7 +63,6 @@ const refs = {
     duplicateBtn: document.getElementById('screenDuplicateBtn'),
     bringToFrontBtn: document.getElementById('screenBringToFrontBtn'),
     deleteBtn: document.getElementById('screenDeleteBtn'),
-    resizeModeBtn: document.getElementById('screenResizeModeBtn'),
     zoomOutBtn: document.getElementById('screenZoomOutBtn'),
     zoomResetBtn: document.getElementById('screenZoomResetBtn'),
     zoomInBtn: document.getElementById('screenZoomInBtn'),
@@ -186,10 +165,6 @@ function getComponentTypeLabel(componentType) {
         text: '文本展示',
         image: '图片展示',
         chart: '图表展示',
-        'chart-bar': '柱状图表',
-        'chart-line': '折线图表',
-        'chart-pie': '饼图表',
-        weather: '天气信息',
         'agri-system': '系统数据卡',
         'agri-environment': '环境监测卡',
         'agri-communication': '通讯状态卡'
@@ -202,7 +177,6 @@ function summarizeComponentProps(component) {
     if (component.type === 'text') return `文本：${component.props.text || ''}`;
     if (component.type === 'image') return `图片说明：${component.props.alt || '未设置'}`;
     if (component.type === 'chart') return `图表类型：${component.props.chartType || 'bar'}`;
-    if (component.type === 'weather') return `地点：${component.props.subtitle || '未命名'} · ${getWeatherDataMode(component) === WEATHER_DATA_MODE_API ? '外部 API' : '手动'}`;
     if (component.type === 'agri-sensor') return `传感器数量：${component.props.sensors?.length || 0}`;
     return '';
 }
@@ -263,7 +237,7 @@ function createImageComponent(x, y) {
     };
 }
 
-function createChartComponent(x, y, chartType = 'bar') {
+function createChartComponent(x, y) {
     return {
         id: state.nextId++,
         type: 'chart',
@@ -273,14 +247,10 @@ function createChartComponent(x, y, chartType = 'bar') {
         height: 320,
         props: {
             title: '',
-            chartType: chartType || 'bar',
+            chartType: 'bar',
             csvText: '类别,值\n销售,120\n成本,80\n利润,45',
             labelColumn: '',
             valueColumn: '',
-            valueColumn2: '',
-            groupColumn: '',
-            seriesLabel1: '',
-            seriesLabel2: '',
             source: createDefaultSource()
         }
     };
@@ -309,64 +279,29 @@ function createSensorComponent(x, y) {
     };
 }
 
-function createWeatherComponent(x, y) {
-    return {
-        id: state.nextId++,
-        type: 'weather',
-        x,
-        y,
-        width: 380,
-        height: 300,
-        props: {
-            title: '天气预报',
-            subtitle: '北京',
-            dataMode: SOURCE_MODE_MANUAL,
-            latitude: 39.9042,
-            longitude: 116.4074,
-            customApiUrl: '',
-            refreshInterval: 600,
-            conditionText: '晴',
-            tempC: '22',
-            humidity: '65',
-            windKmh: '12',
-            updatedAt: '手动预览'
-        }
-    };
-}
-
 function createComponent(type, x, y) {
     if (type === 'text') return createTextComponent(x, y);
     if (type === 'image') return createImageComponent(x, y);
-    if (type === 'chart-bar') return createChartComponent(x, y, 'bar');
-    if (type === 'chart-line') return createChartComponent(x, y, 'line');
-    if (type === 'chart-pie') return createChartComponent(x, y, 'pie');
     if (type === 'chart') return createChartComponent(x, y);
     if (type === 'agri-sensor') return createSensorComponent(x, y);
-    if (type === 'weather') return createWeatherComponent(x, y);
     return null;
 }
 
 function normalizeComponent(rawComponent) {
     const baseId = Number.isFinite(Number(rawComponent?.id)) ? Number(rawComponent.id) : state.nextId++;
-    const rawType = String(rawComponent?.type || 'text');
-    const type = rawType === 'image'
+    const type = rawComponent?.type === 'image'
         ? 'image'
-        : rawType === 'chart' || rawType === 'chart-bar' || rawType === 'chart-line' || rawType === 'chart-pie'
+        : rawComponent?.type === 'chart'
             ? 'chart'
-            : rawType === 'agri-sensor'
+            : rawComponent?.type === 'agri-sensor'
                 ? 'agri-sensor'
-                : rawType === 'weather'
-                    ? 'weather'
                 : 'text';
-    const chartType = rawType === 'chart-line' ? 'line' : rawType === 'chart-pie' ? 'pie' : 'bar';
     const component = type === 'image'
         ? createImageComponent(80, 80)
         : type === 'chart'
-            ? createChartComponent(80, 80, rawComponent?.props?.chartType || chartType)
+            ? createChartComponent(80, 80)
             : type === 'agri-sensor'
                 ? createSensorComponent(80, 80)
-                : type === 'weather'
-                    ? createWeatherComponent(80, 80)
                 : createTextComponent(80, 80);
 
     component.id = baseId;
@@ -384,158 +319,6 @@ function normalizeComponent(rawComponent) {
 
 function isAgricultureComponentType(type) {
     return type === 'agri-sensor';
-}
-
-function isWeatherComponentType(type) {
-    return type === 'weather';
-}
-
-function getWeatherDataMode(component) {
-    return component?.props?.dataMode === WEATHER_DATA_MODE_API ? WEATHER_DATA_MODE_API : SOURCE_MODE_MANUAL;
-}
-
-const WEATHER_REFRESH_MIN_SEC = 10;
-const WEATHER_REFRESH_MAX_SEC = 86400;
-
-function getWeatherRefreshInterval(component) {
-    return clamp(Number(component?.props?.refreshInterval) || 600, WEATHER_REFRESH_MIN_SEC, WEATHER_REFRESH_MAX_SEC);
-}
-
-function isOpenMeteoHostUrl(url) {
-    try {
-        const u = new URL(String(url || '').trim());
-        return /open-meteo\.com$/i.test(u.hostname.replace(/^www\./, ''));
-    } catch {
-        return false;
-    }
-}
-
-function weatherFetchUsesBackendProxy(component) {
-    const custom = typeof component.props?.customApiUrl === 'string' ? component.props.customApiUrl.trim() : '';
-    if (!custom) return true;
-    return isOpenMeteoHostUrl(custom);
-}
-
-function buildWeatherApiRequestUrlForEditor(component) {
-    const lat = Number.isFinite(Number(component.props.latitude)) ? Number(component.props.latitude) : 30.5928;
-    const lon = Number.isFinite(Number(component.props.longitude)) ? Number(component.props.longitude) : 114.3055;
-    if (weatherFetchUsesBackendProxy(component)) {
-        const base = resolveBackendOrigin().replace(/\/+$/, '');
-        const qs = new URLSearchParams();
-        qs.set('latitude', String(lat));
-        qs.set('longitude', String(lon));
-        return `${base}/api/weather/forecast?${qs.toString()}`;
-    }
-    const custom = component.props.customApiUrl.trim();
-    const abs = custom.startsWith('http://') || custom.startsWith('https://');
-    return abs ? custom : new URL(custom, resolveBackendOrigin()).toString();
-}
-
-function wmoWeatherCodeToLabel(code) {
-    const c = Number(code);
-    const map = {
-        0: '晴', 1: '大部晴朗', 2: '多云', 3: '阴', 45: '雾', 48: '雾',
-        51: '小毛毛雨', 53: '毛毛雨', 55: '大毛毛雨', 56: '冻毛毛雨', 57: '冻毛毛雨',
-        61: '小雨', 63: '中雨', 65: '大雨', 66: '冻雨', 67: '冻雨',
-        71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
-        80: '阵雨', 81: '强阵雨', 82: '暴雨', 85: '阵雪', 86: '阵雪',
-        95: '雷暴', 96: '雷暴伴冰雹', 99: '强雷暴伴冰雹'
-    };
-    if (!Number.isFinite(c)) return '—';
-    return map[c] || '天气';
-}
-
-function formatWeatherMetric(value, digits) {
-    if (value == null || !Number.isFinite(Number(value))) return '—';
-    const n = Number(value);
-    const d = Number.isFinite(digits) ? digits : 1;
-    return String(Math.round(n * Math.pow(10, d)) / Math.pow(10, d));
-}
-
-function applyOpenMeteoPayloadToWeatherProps(props, json) {
-    const current = json && json.current && typeof json.current === 'object' ? json.current : null;
-    if (!current) return false;
-    props.tempC = formatWeatherMetric(current.temperature_2m, 1);
-    props.humidity = formatWeatherMetric(current.relative_humidity_2m, 0);
-    props.windKmh = formatWeatherMetric(current.wind_speed_10m, 1);
-    props.conditionText = wmoWeatherCodeToLabel(current.weather_code);
-    const t = current.time ? String(current.time) : '';
-    props.updatedAt = t ? `观测时间 ${t}` : '已更新';
-    return true;
-}
-
-async function syncWeatherFromApiForComponent(component) {
-    if (!component || component.type !== 'weather' || getWeatherDataMode(component) !== WEATHER_DATA_MODE_API) return;
-    if (component._weatherFetching) return;
-    component._weatherLastFetchAt = Date.now();
-    component._weatherFetching = true;
-    const url = buildWeatherApiRequestUrlForEditor(component);
-    try {
-        const response = await fetch(url, { cache: 'no-store' });
-        const rawText = await response.text();
-        if (!response.ok) {
-            let msg = String(response.status);
-            try {
-                const errJson = JSON.parse(rawText);
-                if (errJson?.message != null) msg = String(errJson.message);
-                else if (errJson?.error != null) msg = String(errJson.error);
-            } catch {
-                if (rawText && rawText.length < 200) msg = `${msg}: ${rawText}`;
-            }
-            component.props.updatedAt = `加载失败: ${msg}`;
-            renderStage();
-            return;
-        }
-        if (!rawText || !String(rawText).trim()) {
-            component.props.updatedAt = '加载失败: 空响应';
-            renderStage();
-            return;
-        }
-        let result;
-        try {
-            result = JSON.parse(rawText);
-        } catch {
-            component.props.updatedAt = '加载失败: 响应不是 JSON';
-            renderStage();
-            return;
-        }
-        if (result && typeof result === 'object' && result.status === 'error' && result.message) {
-            component.props.updatedAt = `加载失败: ${result.message}`;
-            renderStage();
-            return;
-        }
-        const payload = result && typeof result === 'object' && result.data && typeof result.data === 'object' && !result.current
-            ? result.data
-            : result;
-        if (applyOpenMeteoPayloadToWeatherProps(component.props, payload)) {
-            renderStage();
-            return;
-        }
-        if (payload && typeof payload === 'object') {
-            if (payload.tempC != null) component.props.tempC = String(payload.tempC);
-            if (payload.humidity != null) component.props.humidity = String(payload.humidity);
-            if (payload.windKmh != null) component.props.windKmh = String(payload.windKmh);
-            if (payload.conditionText != null) component.props.conditionText = String(payload.conditionText);
-            if (payload.updatedAt != null) component.props.updatedAt = String(payload.updatedAt);
-        }
-        renderStage();
-    } catch (error) {
-        component.props.updatedAt = `加载失败: ${error && error.message ? error.message : '网络错误'}`;
-        renderStage();
-    } finally {
-        component._weatherFetching = false;
-    }
-}
-
-function tickEditorWeatherSync() {
-    const now = Date.now();
-    for (const c of state.components.values()) {
-        if (c.type !== 'weather' || getWeatherDataMode(c) !== WEATHER_DATA_MODE_API) continue;
-        const intervalMs = getWeatherRefreshInterval(c) * 1000;
-        const last = c._weatherLastFetchAt || 0;
-        if (last > 0 && now - last < intervalMs) continue;
-        syncWeatherFromApiForComponent(c);
-    }
 }
 
 function usesWorkflowSource(type) {
@@ -891,436 +674,39 @@ function parseCsvText(text) {
     return { headers, records };
 }
 
-function isCsvNumericValue(value) {
-    const normalized = String(value ?? '').trim();
-    if (!normalized) return false;
-    return Number.isFinite(Number(normalized));
-}
-
-function parseChartNumericValue(value) {
-    const normalized = String(value ?? '').trim();
-    if (!normalized) return null;
-    const numberValue = Number(normalized);
-    return Number.isFinite(numberValue) ? numberValue : null;
-}
-
-function isNumericCsvColumn(parsed, header) {
-    if (!Array.isArray(parsed?.records) || !header) return false;
-    return parsed.records.every(record => isCsvNumericValue(record?.[header]));
-}
-
 function resolveChartColumns(parsed, component) {
     const headers = Array.isArray(parsed?.headers) ? parsed.headers : [];
-    const numericColumns = headers.filter(header => isNumericCsvColumn(parsed, header));
-    const isMultiMode = component.props.chartType === 'line-multi' || component.props.chartType === 'bar-multi';
-    const selectedValue = headers.includes(component.props.valueColumn) && isNumericCsvColumn(parsed, component.props.valueColumn)
-        ? component.props.valueColumn
-        : numericColumns[0] || headers[1] || headers[0] || '';
-    const selectedValue2 = headers.includes(component.props.valueColumn2) && isNumericCsvColumn(parsed, component.props.valueColumn2)
-        ? component.props.valueColumn2
-        : numericColumns[1] || headers[2] || headers[1] || selectedValue;
-    const idColumnPattern = /(^id$|id|编号|设备|装置|传感器|名称|name|device|sensor)/i;
-    const fallbackLabelColumn = isMultiMode
-        ? headers.find(header => header !== selectedValue && header !== selectedValue2 && !isNumericCsvColumn(parsed, header))
-            || headers.find(header => header !== selectedValue && header !== selectedValue2)
-            || ''
-        : headers[0] || '';
-    const fallbackGroupColumn = headers.find(header => header !== selectedValue && idColumnPattern.test(header))
-        || headers.find(header => header !== selectedValue && !isNumericCsvColumn(parsed, header))
-        || headers.find(header => header !== selectedValue)
-        || headers[0]
-        || '';
-    const selectedLabel = headers.includes(component.props.labelColumn)
-        && (!isMultiMode || (component.props.labelColumn !== selectedValue && component.props.labelColumn !== selectedValue2))
-        ? component.props.labelColumn
-        : fallbackLabelColumn;
-    const selectedGroup = isMultiMode
-        ? ''
-        : (headers.includes(component.props.groupColumn) ? component.props.groupColumn : fallbackGroupColumn);
+    const records = Array.isArray(parsed?.records) ? parsed.records : [];
+    const fallbackLabelColumn = headers[0] || '';
+    const numericColumns = headers.filter(header => records.some(record => Number.isFinite(Number(record?.[header]))));
+    const fallbackValueColumn = numericColumns[0] || headers[1] || headers[0] || '';
 
     return {
-        labelColumn: selectedLabel,
-        valueColumn: selectedValue,
-        valueColumn2: selectedValue2,
-        groupColumn: selectedGroup,
-        numericColumns
+        labelColumn: headers.includes(component.props.labelColumn) ? component.props.labelColumn : fallbackLabelColumn,
+        valueColumn: headers.includes(component.props.valueColumn) ? component.props.valueColumn : fallbackValueColumn
     };
 }
 
 function buildChartRows(parsed, columns) {
     const records = Array.isArray(parsed?.records) ? parsed.records : [];
-    if (records.length > 100) {
-        // 当数据量大于100时，简化到30组数据，取相邻数据的平均值
-        const groupCount = 30;
-        const groupSize = Math.ceil(records.length / groupCount);
-        const simplifiedRows = [];
-        for (let i = 0; i < groupCount; i++) {
-            const start = i * groupSize;
-            const end = Math.min(start + groupSize, records.length);
-            const groupRecords = records.slice(start, end);
-            const labelText = `数据组 ${i + 1}`;
-            const values1 = groupRecords.map(record => parseChartNumericValue(record?.[columns.valueColumn])).filter(v => v != null);
-            const values2 = groupRecords.map(record => parseChartNumericValue(record?.[columns.valueColumn2])).filter(v => v != null);
-            const avgValue1 = values1.length ? values1.reduce((sum, v) => sum + v, 0) / values1.length : null;
-            const avgValue2 = values2.length ? values2.reduce((sum, v) => sum + v, 0) / values2.length : null;
-            simplifiedRows.push({
-                label: labelText,
-                value: avgValue1,
-                value1: avgValue1,
-                value2: avgValue2
-            });
-        }
-        return { rows: simplifiedRows };
+    const MAX_ROWS = 100; // 数据上限为100行
+    if (records.length > MAX_ROWS) {
+        return { error: `数据行数过多（${records.length}），最多支持 ${MAX_ROWS} 行。`, rows: [] };
     }
     const rows = records.map((record, index) => {
         const labelText = String(record?.[columns.labelColumn] ?? '').trim();
-        const value1 = parseChartNumericValue(record?.[columns.valueColumn]);
-        const value2 = parseChartNumericValue(record?.[columns.valueColumn2]);
+        const value = Number(record?.[columns.valueColumn]);
         return {
             label: labelText || `行 ${index + 1}`,
-            value: value1,
-            value1,
-            value2
+            value: Number.isFinite(value) ? value : 0
         };
     });
 
-    if (!rows.some(row => row.value1 != null)) {
+    if (!rows.length) {
         return { error: 'CSV 中未解析到可视化数据。', rows: [] };
     }
 
     return { rows };
-}
-
-function buildMultiSeriesChartRows(parsed, columns) {
-    const records = Array.isArray(parsed?.records) ? parsed.records : [];
-    if (!records.length) {
-        return { error: 'CSV 中未解析到可视化数据。', rows: [], seriesLabels: [], series: [] };
-    }
-
-    const seriesOrder = [];
-    const seriesBuckets = new Map();
-    const xValueSet = new Set();
-
-    records.forEach(record => {
-        const seriesLabel = String(record?.[columns.labelColumn] ?? '').trim() || '未命名标签';
-        const xValue = parseChartNumericValue(record?.[columns.valueColumn]);
-        const yValue = parseChartNumericValue(record?.[columns.valueColumn2]);
-        if (xValue == null || yValue == null) return;
-
-        if (!seriesBuckets.has(seriesLabel)) {
-            seriesBuckets.set(seriesLabel, new Map());
-            seriesOrder.push(seriesLabel);
-        }
-
-        const pointBuckets = seriesBuckets.get(seriesLabel);
-        const currentBucket = pointBuckets.get(xValue) || { x: xValue, sumY: 0, count: 0 };
-        currentBucket.sumY += yValue;
-        currentBucket.count += 1;
-        pointBuckets.set(xValue, currentBucket);
-        xValueSet.add(xValue);
-    });
-
-    const series = seriesOrder.map(seriesLabel => ({
-        label: seriesLabel,
-        points: Array.from(seriesBuckets.get(seriesLabel)?.values() || [])
-            .map(bucket => ({
-                x: bucket.x,
-                y: bucket.count ? bucket.sumY / bucket.count : null
-            }))
-            .filter(point => point.y != null)
-            .sort((a, b) => a.x - b.x)
-    })).filter(item => item.points.length);
-
-    if (!series.length) {
-        return { error: '当前标签列与横纵坐标列没有可用于多系列图的数据。', rows: [], seriesLabels: [], series: [] };
-    }
-
-    const pointLookups = series.map(item => new Map(item.points.map(point => [point.x, point.y])));
-    const xValues = Array.from(xValueSet).sort((a, b) => a - b);
-    const rows = xValues.map(xValue => ({
-        label: formatChartAxisValue(xValue),
-        xValue,
-        seriesValues: pointLookups.map(pointLookup => pointLookup.has(xValue) ? pointLookup.get(xValue) : null)
-    }));
-
-    return {
-        rows,
-        seriesLabels: series.map(item => item.label),
-        series
-    };
-}
-
-function getChartSeriesLabel(label, fallbackColumn, defaultLabel) {
-    const normalized = String(label ?? '').trim();
-    if (!normalized || normalized === defaultLabel) return fallbackColumn || defaultLabel;
-    return normalized;
-}
-
-function formatChartAxisValue(value) {
-    const numberValue = Number(value);
-    if (!Number.isFinite(numberValue)) return '0';
-    if (Math.abs(numberValue) < 1e-9) return '0';
-    if (Number.isInteger(numberValue)) return String(numberValue);
-    const absValue = Math.abs(numberValue);
-    const fractionDigits = absValue >= 1000 ? 1 : absValue >= 1 ? 2 : 4;
-    return numberValue.toFixed(fractionDigits).replace(/\.?0+$/, '');
-}
-
-function getChartNumericValues(values) {
-    return values
-        .filter(value => value != null && String(value).trim() !== '')
-        .map(value => Number(value))
-        .filter(value => Number.isFinite(value));
-}
-
-function getChartAxisRange(values) {
-    const numericValues = getChartNumericValues(values);
-
-    if (!numericValues.length) return { min: 0, max: 1 };
-
-    const minValue = Math.min(...numericValues);
-    const maxValue = Math.max(...numericValues);
-    if (minValue === maxValue) {
-        const padding = maxValue === 0 ? 1 : Math.max(Math.abs(maxValue) * 0.02, 0.000001);
-        return {
-            min: minValue > 0 ? Math.max(0, minValue - padding) : minValue - padding,
-            max: maxValue + padding
-        };
-    }
-
-    const range = maxValue - minValue;
-    const relativeRange = range / Math.max(Math.abs(maxValue), 1);
-    const shouldZoomPositiveRange = minValue > 0 && relativeRange <= 0.35;
-
-    if (shouldZoomPositiveRange) {
-        const padding = Math.max(range * 0.25, Math.abs(maxValue) * 0.002, 0.000001);
-        return {
-            min: Math.max(0, minValue - padding),
-            max: maxValue + padding
-        };
-    }
-
-    const padding = Math.max(range * 0.12, Math.abs(maxValue) * 0.01, 1);
-    return {
-        min: minValue < 0 ? minValue - padding : 0,
-        max: maxValue > 0 ? maxValue + padding : 0
-    };
-}
-
-function getChartTypicalGap(sortedValues, axisSpan) {
-    const gaps = sortedValues
-        .slice(1)
-        .map((value, index) => value - sortedValues[index])
-        .filter(gap => gap > 0)
-        .sort((a, b) => a - b);
-
-    if (!gaps.length) return Math.max(axisSpan * 0.1, 1);
-    if (gaps.length === 1) {
-        return Math.max(Math.min(gaps[0] * 0.18, axisSpan * 0.12), 1);
-    }
-    return gaps[Math.floor((gaps.length - 1) * 0.35)];
-}
-
-function buildChartAxisScale(values, options = {}) {
-    const numericValues = getChartNumericValues(values);
-    const axisRange = options.axisRange || getChartAxisRange(numericValues);
-    const min = Number(axisRange?.min);
-    const max = Number(axisRange?.max);
-    const axisSpan = Math.max(max - min, 0);
-
-    if (!Number.isFinite(min) || !Number.isFinite(max) || axisSpan <= 0) {
-        return {
-            min: 0,
-            max: 1,
-            axisSpan: 1,
-            transformedSpan: 1,
-            breaks: [],
-            visibleSegments: [{ start: 0, end: 1, transformedStart: 0, transformedEnd: 1 }],
-            hasBreaks: false
-        };
-    }
-
-    const uniqueValues = Array.from(new Set(
-        numericValues
-            .filter(value => value >= min && value <= max)
-            .sort((a, b) => a - b)
-    ));
-    const typicalGap = getChartTypicalGap(uniqueValues, axisSpan);
-    const minBreakGap = Math.max(axisSpan * 0.22, typicalGap * 3.5, 0.000001);
-    const maxBreakCount = Math.max(0, Math.floor(Number(options.maxBreakCount ?? 2) || 0));
-    const selectedBreaks = uniqueValues
-        .slice(1)
-        .map((value, index) => ({
-            start: uniqueValues[index],
-            end: value,
-            gap: value - uniqueValues[index]
-        }))
-        .filter(item => item.gap >= minBreakGap)
-        .sort((a, b) => b.gap - a.gap)
-        .slice(0, maxBreakCount)
-        .map(item => {
-            const compressedSize = Math.min(
-                item.gap * 0.22,
-                Math.max(typicalGap * 1.4, axisSpan * 0.045, 0.000001)
-            );
-            return compressedSize < item.gap
-                ? { ...item, compressedSize }
-                : null;
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.start - b.start);
-
-    const visibleSegments = [];
-    let transformedCursor = 0;
-    let domainCursor = min;
-
-    selectedBreaks.forEach(item => {
-        const segmentLength = Math.max(item.start - domainCursor, 0);
-        visibleSegments.push({
-            start: domainCursor,
-            end: item.start,
-            transformedStart: transformedCursor,
-            transformedEnd: transformedCursor + segmentLength
-        });
-        transformedCursor += segmentLength;
-        item.transformedStart = transformedCursor;
-        item.transformedEnd = transformedCursor + item.compressedSize;
-        transformedCursor = item.transformedEnd;
-        domainCursor = item.end;
-    });
-
-    const trailingLength = Math.max(max - domainCursor, 0);
-    visibleSegments.push({
-        start: domainCursor,
-        end: max,
-        transformedStart: transformedCursor,
-        transformedEnd: transformedCursor + trailingLength
-    });
-    transformedCursor += trailingLength;
-
-    return {
-        min,
-        max,
-        axisSpan,
-        transformedSpan: Math.max(transformedCursor, 0.000001),
-        typicalGap,
-        breaks: selectedBreaks,
-        visibleSegments,
-        hasBreaks: selectedBreaks.length > 0
-    };
-}
-
-function transformChartAxisValue(axisScale, value) {
-    const scale = axisScale || buildChartAxisScale([]);
-    const numericValue = clamp(parseChartNumericValue(value) ?? scale.min, scale.min, scale.max);
-    let transformedOffset = numericValue - scale.min;
-
-    scale.breaks.forEach(item => {
-        if (numericValue >= item.end) {
-            transformedOffset -= item.gap - item.compressedSize;
-            return;
-        }
-        if (numericValue > item.start) {
-            const usedGap = numericValue - item.start;
-            const compressedGap = (usedGap / item.gap) * item.compressedSize;
-            transformedOffset -= usedGap - compressedGap;
-        }
-    });
-
-    return transformedOffset;
-}
-
-function projectChartAxisValue(axisScale, value, pixelStart, pixelEnd, reverse = false) {
-    const scale = axisScale || buildChartAxisScale([]);
-    const transformedValue = transformChartAxisValue(scale, value);
-    const ratio = clamp(transformedValue / Math.max(scale.transformedSpan, 0.000001), 0, 1);
-    const pixelSpan = pixelEnd - pixelStart;
-    return reverse
-        ? pixelEnd - ratio * pixelSpan
-        : pixelStart + ratio * pixelSpan;
-}
-
-function buildChartAxisTickValues(axisScale, desiredCount = 4) {
-    const scale = axisScale || buildChartAxisScale([]);
-    if (!scale.hasBreaks) {
-        return Array.from({ length: desiredCount + 1 }, (_, index) => (
-            scale.min + ((scale.max - scale.min) / desiredCount) * index
-        ));
-    }
-
-    const values = [scale.min, scale.max];
-    const totalSpan = Math.max(scale.transformedSpan, 0.000001);
-
-    scale.visibleSegments.forEach(segment => {
-        const segmentSpan = Math.max(segment.end - segment.start, 0);
-        if (segmentSpan <= 0) {
-            values.push(segment.start);
-            return;
-        }
-        const segmentShare = (segment.transformedEnd - segment.transformedStart) / totalSpan;
-        const intervals = Math.max(1, Math.min(3, Math.round(segmentShare * desiredCount * 1.8)));
-        for (let index = 0; index <= intervals; index += 1) {
-            values.push(segment.start + (segmentSpan * index) / intervals);
-        }
-    });
-
-    scale.breaks.forEach(item => {
-        values.push(item.start, item.end);
-    });
-
-    values.sort((a, b) => a - b);
-    const epsilon = Math.max((scale.max - scale.min) * 1e-9, 1e-9);
-    return values.filter((value, index, array) => index === 0 || Math.abs(value - array[index - 1]) > epsilon);
-}
-
-function buildChartAxisTicks(axisScale, positionGetter, desiredCount = 4, minGap = 28) {
-    const entries = buildChartAxisTickValues(axisScale, desiredCount)
-        .map(value => ({ value, position: positionGetter(value) }))
-        .filter(entry => Number.isFinite(entry.position))
-        .sort((a, b) => a.position - b.position);
-
-    if (entries.length <= 2) return entries;
-
-    const filtered = [entries[0]];
-    for (let index = 1; index < entries.length - 1; index += 1) {
-        const previous = filtered[filtered.length - 1];
-        if (Math.abs(entries[index].position - previous.position) >= minGap) {
-            filtered.push(entries[index]);
-        }
-    }
-
-    const lastEntry = entries[entries.length - 1];
-    const previous = filtered[filtered.length - 1];
-    if (!previous || Math.abs(lastEntry.position - previous.position) >= minGap * 0.55) {
-        filtered.push(lastEntry);
-    } else {
-        filtered[filtered.length - 1] = lastEntry;
-    }
-    return filtered;
-}
-
-function renderChartAxisBreaks(axisScale, positionGetter, orientation, axisPosition, color = '#94a3b8') {
-    const scale = axisScale || buildChartAxisScale([]);
-    if (!scale.hasBreaks) return '';
-
-    return scale.breaks.map(item => {
-        const center = positionGetter((item.start + item.end) / 2);
-        if (!Number.isFinite(center)) return '';
-        if (orientation === 'y') {
-            return `
-                <path d="M ${axisPosition - 5} ${center + 7} L ${axisPosition + 5} ${center - 1}" stroke="${color}" stroke-width="1.8" stroke-linecap="round" fill="none" />
-                <path d="M ${axisPosition - 5} ${center + 1} L ${axisPosition + 5} ${center - 7}" stroke="${color}" stroke-width="1.8" stroke-linecap="round" fill="none" />
-            `;
-        }
-        return `
-            <path d="M ${center - 7} ${axisPosition - 5} L ${center + 1} ${axisPosition + 5}" stroke="${color}" stroke-width="1.8" stroke-linecap="round" fill="none" />
-            <path d="M ${center - 1} ${axisPosition - 5} L ${center + 7} ${axisPosition + 5}" stroke="${color}" stroke-width="1.8" stroke-linecap="round" fill="none" />
-        `;
-    }).join('');
-}
-
-function getChartAxisBaseline(axisRange) {
-    return clamp(0, axisRange.min, axisRange.max);
 }
 
 function getChartRenderState(component) {
@@ -1353,88 +739,28 @@ function getChartRenderState(component) {
     }
 
     const columns = resolveChartColumns(parsed, component);
-    const isDoubleMode = component.props.chartType === 'line-double' || component.props.chartType === 'bar-double';
-    const isMultiMode = component.props.chartType === 'line-multi' || component.props.chartType === 'bar-multi';
-    if (!Array.isArray(columns.numericColumns) || !columns.numericColumns.length || ((isDoubleMode || isMultiMode) && columns.numericColumns.length < 2)) {
-        return {
-            chartType: component.props.chartType || 'bar',
-            csvText,
-            parsed: {
-                headers: parsed.headers,
-                records: parsed.records,
-                error: isMultiMode
-                    ? '多折线图和多柱状图需要一个标签列和两个全部为具体数值的数值列。'
-                    : isDoubleMode
-                    ? '双系列图需要两个全部为具体数值的数值列。'
-                    : '当前 CSV 中没有可用的数值列。请确保至少一列全部为具体数值。'
-            },
-            chartRows: [],
-            ...columns,
-            sourceNote
-        };
-    }
-
-    if (isMultiMode && (!columns.labelColumn || columns.labelColumn === columns.valueColumn || columns.labelColumn === columns.valueColumn2)) {
-        return {
-            chartType: component.props.chartType || 'bar',
-            csvText,
-            parsed: {
-                headers: parsed.headers,
-                records: parsed.records,
-                error: '多折线图和多柱状图需要选择一个独立的标签列，并与横纵坐标列区分开。'
-            },
-            chartRows: [],
-            ...columns,
-            sourceNote
-        };
-    }
-
-    if (isMultiMode && columns.valueColumn === columns.valueColumn2) {
-        return {
-            chartType: component.props.chartType || 'bar',
-            csvText,
-            parsed: {
-                headers: parsed.headers,
-                records: parsed.records,
-                error: '多折线图和多柱状图的横坐标列与纵坐标列不能相同。'
-            },
-            chartRows: [],
-            ...columns,
-            sourceNote
-        };
-    }
-
-    const chartRows = isMultiMode
-        ? buildMultiSeriesChartRows(parsed, columns)
-        : buildChartRows(parsed, columns);
+    const chartRows = buildChartRows(parsed, columns);
     return {
         chartType: component.props.chartType || 'bar',
         csvText,
         parsed,
         chartRows,
-        seriesLabel1: getChartSeriesLabel(component.props.seriesLabel1, columns.valueColumn, '系列一'),
-        seriesLabel2: getChartSeriesLabel(component.props.seriesLabel2, columns.valueColumn2, '系列二'),
         ...columns,
         sourceNote
     };
 }
 
-function renderChartSvg(chartType, rows, width, height, seriesLabel1 = '', seriesLabel2 = '', options = {}) {
+function renderChartSvg(chartType, rows, width, height) {
     const padding = 20;
     const innerWidth = Math.max(width - padding * 2, 120);
     const innerHeight = Math.max(height - padding * 2, 120);
     const colors = ['#2f80ed', '#56ccf2', '#6fcf97', '#f2c94c', '#f2994a', '#eb5757'];
-    const wrapChartPlot = (svgMarkup, legendMarkup = '') => `
-        <div class="chart-plot">
-            ${svgMarkup}
-            ${legendMarkup ? `<div class="chart-legend chart-legend-overlay">${legendMarkup}</div>` : ''}
-        </div>
-    `;
+
+    if (!rows.length) {
+        return `<div class="chart-error">无有效数据</div>`;
+    }
 
     if (chartType === 'pie') {
-        if (!rows.length) {
-            return `<div class="chart-error">无有效数据</div>`;
-        }
         const total = rows.reduce((sum, item) => sum + Math.max(0, item.value), 0) || 1;
         const radius = Math.min(innerWidth, innerHeight) * 0.35;
         let startAngle = 0;
@@ -1466,317 +792,48 @@ function renderChartSvg(chartType, rows, width, height, seriesLabel1 = '', serie
         `;
     }
 
-    const isDoubleLine = chartType === 'line-double';
-    const isDoubleBar = chartType === 'bar-double';
-    const isMultiLine = chartType === 'line-multi';
-    const isMultiBar = chartType === 'bar-multi';
-    const multiSeries = Array.isArray(options.multiSeries) ? options.multiSeries : [];
-    const hasMultiSeriesData = multiSeries.some(item => Array.isArray(item?.points) && item.points.length);
-
-    if (!rows.length && !hasMultiSeriesData) {
-        return `<div class="chart-error">无有效数据</div>`;
-    }
-
-    if (isMultiLine || isMultiBar) {
-        const axisTop = 18;
-        const axisBottom = 30;
-        const axisLeft = 44;
-        const axisRight = 16;
-        const plotLeft = axisLeft;
-        const plotTop = axisTop;
-        const plotWidth = Math.max(width - axisLeft - axisRight, 80);
-        const plotHeight = Math.max(height - axisTop - axisBottom, 70);
-        const plotRight = plotLeft + plotWidth;
-        const plotBottom = plotTop + plotHeight;
-        const multiSeriesData = multiSeries.map((item, index) => ({
-            label: String(item?.label ?? '').trim() || `系列 ${index + 1}`,
-            points: (Array.isArray(item?.points) ? item.points : [])
-                .map(point => ({
-                    x: parseChartNumericValue(point?.x),
-                    y: parseChartNumericValue(point?.y)
-                }))
-                .filter(point => point.x != null && point.y != null)
-                .sort((a, b) => a.x - b.x)
-        })).filter(item => item.points.length);
-
-        if (!multiSeriesData.length) {
-            return `<div class="chart-error">无有效数据</div>`;
-        }
-
-        const allPoints = multiSeriesData.flatMap(item => item.points);
-        const axisRangeX = getChartAxisRange(allPoints.map(item => item.x));
-        const axisRangeY = getChartAxisRange(allPoints.map(item => item.y));
-        const axisScaleX = buildChartAxisScale(allPoints.map(item => item.x), { axisRange: axisRangeX });
-        const axisScaleY = buildChartAxisScale(allPoints.map(item => item.y), { axisRange: axisRangeY });
-        const baselineY = getChartAxisBaseline(axisRangeY);
-        const getX = value => projectChartAxisValue(axisScaleX, value, plotLeft, plotRight);
-        const getY = value => projectChartAxisValue(axisScaleY, value, plotTop, plotBottom, true);
-        const yTicks = buildChartAxisTicks(axisScaleY, getY, 4, 26);
-        const xTicks = buildChartAxisTicks(axisScaleX, getX, 4, 42);
-        const horizontalGridLines = yTicks.map(({ position }) => (
-            `<line x1="${plotLeft}" y1="${position}" x2="${plotRight}" y2="${position}" stroke="#e2e8f0" stroke-width="1" />`
-        )).join('');
-        const verticalGridLines = xTicks.map(({ position }) => (
-            `<line x1="${position}" y1="${plotTop}" x2="${position}" y2="${plotBottom}" stroke="#eef2f7" stroke-width="1" />`
-        )).join('');
-        const leftTicks = yTicks.map(({ value, position }) => `
-                <line x1="${plotLeft - 4}" y1="${position}" x2="${plotLeft}" y2="${position}" stroke="#94a3b8" stroke-width="1" />
-                <text x="${plotLeft - 7}" y="${position + 3}" text-anchor="end" font-size="10" fill="#64748b">${formatChartAxisValue(value)}</text>
-            `
-        ).join('');
-        const bottomTicks = xTicks.map(({ value, position }) => `
-                <line x1="${position}" y1="${plotBottom}" x2="${position}" y2="${plotBottom + 4}" stroke="#94a3b8" stroke-width="1" />
-                <text x="${position}" y="${plotBottom + 18}" text-anchor="middle" font-size="10" fill="#475569">${formatChartAxisValue(value)}</text>
-            `
-        ).join('');
-        const axes = `
-            ${horizontalGridLines}
-            ${verticalGridLines}
-            <line x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}" stroke="#94a3b8" stroke-width="1.2" />
-            <line x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${plotBottom}" stroke="#94a3b8" stroke-width="1.2" />
-            ${renderChartAxisBreaks(axisScaleY, getY, 'y', plotLeft, '#94a3b8')}
-            ${renderChartAxisBreaks(axisScaleX, getX, 'x', plotBottom, '#94a3b8')}
-            ${leftTicks}
-            ${bottomTicks}
-        `;
-
-        if (isMultiLine) {
-            const buildNumericPath = points => points.map((point, index) => {
-                const command = index === 0 ? 'M' : 'L';
-                return `${command} ${getX(point.x)} ${getY(point.y)}`;
-            }).join(' ');
-            const seriesMarkup = multiSeriesData.map((series, seriesIndex) => {
-                const color = colors[seriesIndex % colors.length];
-                const pathD = buildNumericPath(series.points);
-                const circles = series.points.map(point => `
-                    <circle cx="${getX(point.x)}" cy="${getY(point.y)}" r="3.5" fill="${color}" />
-                `).join('');
-                return `
-                    <path d="${pathD}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-                    ${circles}
-                `;
-            }).join('');
-            const legend = multiSeriesData.slice(0, 12).map((series, index) => `
-                <div class="chart-legend-item"><span style="background:${colors[index % colors.length]}"></span>${escapeHtml(series.label)}</div>
-            `).join('');
-            return wrapChartPlot(`
-                <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="多折线图">
-                    ${axes}
-                    ${seriesMarkup}
-                </svg>
-            `, legend);
-        }
-
-        const uniqueXValues = Array.from(new Set(allPoints.map(item => item.x))).sort((a, b) => a - b);
-        const xCenters = uniqueXValues.map(value => getX(value));
-        const minCenterGap = xCenters.slice(1).reduce((minGap, center, index) => Math.min(minGap, center - xCenters[index]), Infinity);
-        const baseGap = Number.isFinite(minCenterGap) ? minCenterGap : plotWidth * 0.6;
-        const groupWidth = Math.max(10, Math.min(baseGap * 0.72, 56));
-        const seriesCount = Math.max(multiSeriesData.length, 1);
-        const multiGap = Math.max(1, Math.min(groupWidth * 0.08, 4));
-        const barWidth = Math.max(1, Math.min((groupWidth - multiGap * Math.max(seriesCount - 1, 0)) / seriesCount, 24));
-        const actualGroupWidth = barWidth * seriesCount + multiGap * Math.max(seriesCount - 1, 0);
-        const baseY = getY(baselineY);
-        const pointLookups = multiSeriesData.map(item => new Map(item.points.map(point => [point.x, point.y])));
-        const bars = uniqueXValues.map(xValue => {
-            const centerX = getX(xValue);
-            const groupStartX = centerX - actualGroupWidth / 2;
-            return multiSeriesData.map((series, seriesIndex) => {
-                const value = pointLookups[seriesIndex].get(xValue);
-                if (value == null) return '';
-                const y = getY(value);
-                const heightValue = Math.abs(baseY - y);
-                const x = groupStartX + seriesIndex * (barWidth + multiGap);
-                return `<rect x="${x}" y="${Math.min(y, baseY)}" width="${barWidth}" height="${heightValue}" fill="${colors[seriesIndex % colors.length]}" />`;
-            }).join('');
-        }).join('');
-        const legend = multiSeriesData.slice(0, 12).map((series, index) => `
-            <div class="chart-legend-item"><span style="background:${colors[index % colors.length]}"></span>${escapeHtml(series.label)}</div>
-        `).join('');
-        return wrapChartPlot(`
-            <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="多柱状图">
-                ${axes}
-                ${bars}
-            </svg>
-        `, legend);
-    }
-
-    const isDoubleAxis = isDoubleLine || isDoubleBar;
-    const axisTop = 18;
-    const axisBottom = 30;
-    const axisLeft = 44;
-    const axisRight = isDoubleAxis ? 44 : 12;
-    const plotLeft = axisLeft;
-    const plotTop = axisTop;
-    const plotWidth = Math.max(width - axisLeft - axisRight, 80);
-    const plotHeight = Math.max(height - axisTop - axisBottom, 70);
-    const plotRight = plotLeft + plotWidth;
-    const plotBottom = plotTop + plotHeight;
-    const axisRange1 = getChartAxisRange(rows.map(item => item.value1 ?? item.value));
-    const axisRange2 = getChartAxisRange(rows.map(item => item.value2));
-    const axisScale1 = buildChartAxisScale(rows.map(item => item.value1 ?? item.value), { axisRange: axisRange1 });
-    const axisScale2 = buildChartAxisScale(rows.map(item => item.value2), { axisRange: axisRange2 });
-    const baseline1 = getChartAxisBaseline(axisRange1);
-    const baseline2 = getChartAxisBaseline(axisRange2);
-    const leftAxisColor = isDoubleAxis ? colors[0] : '#64748b';
-    const leftAxisStroke = isDoubleAxis ? colors[0] : '#94a3b8';
-    const slotCount = Math.max(rows.length, 1);
-    const slotWidth = plotWidth / slotCount;
-    const slotCenters = rows.map((item, index) => plotLeft + (index + 0.5) * slotWidth);
-    const barWidth = Math.max(0.6, Math.min(slotWidth * 0.56, 42));
-    const seriesGap = Math.max(0.2, Math.min(slotWidth * 0.08, 8));
-    const doubleBarWidth = Math.max(0.4, Math.min((slotWidth * 0.76 - seriesGap) / 2, 32));
-    const getY = (value, axisScale) => projectChartAxisValue(axisScale, value, plotTop, plotBottom, true);
-    const leftTickEntries = buildChartAxisTicks(axisScale1, value => getY(value, axisScale1), 4, 26);
-    const rightTickEntries = isDoubleAxis
-        ? buildChartAxisTicks(axisScale2, value => getY(value, axisScale2), 4, 26)
-        : [];
-    const gridLines = leftTickEntries.map(({ position }) => (
-        `<line x1="${plotLeft}" y1="${position}" x2="${plotRight}" y2="${position}" stroke="#e2e8f0" stroke-width="1" />`
-    )).join('');
-    const leftTicks = leftTickEntries.map(({ value, position }) => `
-            <line x1="${plotLeft - 4}" y1="${position}" x2="${plotLeft}" y2="${position}" stroke="${leftAxisStroke}" stroke-width="1" />
-            <text x="${plotLeft - 7}" y="${position + 3}" text-anchor="end" font-size="10" fill="${leftAxisColor}">${formatChartAxisValue(value)}</text>
-        `
-    ).join('');
-    const rightTicks = isDoubleAxis ? rightTickEntries.map(({ value, position }) => `
-            <line x1="${plotRight}" y1="${position}" x2="${plotRight + 4}" y2="${position}" stroke="${colors[1]}" stroke-width="1" />
-            <text x="${plotRight + 7}" y="${position + 3}" text-anchor="start" font-size="10" fill="${colors[1]}">${formatChartAxisValue(value)}</text>
-        `
-    ).join('') : '';
-    const axes = `
-        ${gridLines}
-        <line x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}" stroke="${leftAxisStroke}" stroke-width="1.2" />
-        ${isDoubleAxis ? `<line x1="${plotRight}" y1="${plotTop}" x2="${plotRight}" y2="${plotBottom}" stroke="${colors[1]}" stroke-width="1.2" />` : ''}
-        <line x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${plotBottom}" stroke="#94a3b8" stroke-width="1.2" />
-        ${renderChartAxisBreaks(axisScale1, value => getY(value, axisScale1), 'y', plotLeft, leftAxisStroke)}
-        ${isDoubleAxis ? renderChartAxisBreaks(axisScale2, value => getY(value, axisScale2), 'y', plotRight, colors[1]) : ''}
-        ${leftTicks}
-        ${rightTicks}
-    `;
-    const xLabels = rows.map((item, index) => `
-        <text x="${slotCenters[index]}" y="${plotBottom + 18}" text-anchor="middle" font-size="10" fill="#475569">${escapeHtml(item.label)}</text>
-    `).join('');
-    const buildLinePath = (points, maxGap = Infinity) => {
-        const validPoints = points.filter(Boolean);
-        return validPoints.map((point, index) => {
-            const previousPoint = validPoints[index - 1];
-            const isCloseToPrevious = previousPoint && Math.abs(point.x - previousPoint.x) <= maxGap;
-            const command = index === 0 || !isCloseToPrevious ? 'M' : 'L';
-            return `${command} ${point.x} ${point.y}`;
-        }).join(' ');
-    };
-
-    if (isDoubleLine) {
-        const points1 = rows.map((item, index) => {
-            const value = parseChartNumericValue(item.value1);
-            if (value == null) return null;
-            const centerX = slotCenters[index];
-            const y = getY(value, axisScale1);
-            return { x: centerX, y, label: item.label, value };
-        });
-        const points2 = rows.map((item, index) => {
-            const value = parseChartNumericValue(item.value2);
-            if (value == null) return null;
-            const centerX = slotCenters[index];
-            const y = getY(value, axisScale2);
-            return { x: centerX, y, label: item.label, value };
-        });
-        const path1 = buildLinePath(points1);
-        const path2 = buildLinePath(points2);
-        const circles1 = points1.filter(Boolean).map((point, index) => `
-            <circle cx="${point.x}" cy="${point.y}" r="4" fill="${colors[0]}" />
-        `).join('');
-        const circles2 = points2.filter(Boolean).map((point, index) => `
-            <circle cx="${point.x}" cy="${point.y}" r="4" fill="${colors[1]}" />
-        `).join('');
-        const legend = `<div class="chart-legend"><div class="chart-legend-item"><span style="background:${colors[0]}"></span>${escapeHtml(seriesLabel1 || '系列一')}</div><div class="chart-legend-item"><span style="background:${colors[1]}"></span>${escapeHtml(seriesLabel2 || '系列二')}</div></div>`;
-        return wrapChartPlot(`
-            <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="双折线图">
-                ${axes}
-                <path d="${path1}" fill="none" stroke="${colors[0]}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="${path2}" fill="none" stroke="${colors[1]}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-                ${circles1}
-                ${circles2}
-                ${xLabels}
-            </svg>
-        `, legend);
-    }
-
-    if (isDoubleBar) {
-        const bars = rows.map((item, index) => {
-            const centerX = slotCenters[index];
-            const value1 = parseChartNumericValue(item.value1);
-            const value2 = parseChartNumericValue(item.value2);
-            const y1 = value1 == null ? null : getY(value1, axisScale1);
-            const y2 = value2 == null ? null : getY(value2, axisScale2);
-            const baseY1 = getY(baseline1, axisScale1);
-            const baseY2 = getY(baseline2, axisScale2);
-            const groupWidth = doubleBarWidth * 2 + seriesGap;
-            const x1 = centerX - groupWidth / 2;
-            const x2 = x1 + doubleBarWidth + seriesGap;
-            const bar1 = y1 == null ? '' : `
-                <rect x="${x1}" y="${Math.min(y1, baseY1)}" width="${doubleBarWidth}" height="${Math.abs(baseY1 - y1)}" fill="${colors[0]}" />
-                <text x="${x1 + doubleBarWidth / 2}" y="${Math.max(plotTop + 10, y1 - 6)}" text-anchor="middle" font-size="10" fill="#102a43">${formatChartAxisValue(value1)}</text>
-            `;
-            const bar2 = y2 == null ? '' : `
-                <rect x="${x2}" y="${Math.min(y2, baseY2)}" width="${doubleBarWidth}" height="${Math.abs(baseY2 - y2)}" fill="${colors[1]}" />
-                <text x="${x2 + doubleBarWidth / 2}" y="${Math.max(plotTop + 10, y2 - 6)}" text-anchor="middle" font-size="10" fill="#102a43">${formatChartAxisValue(value2)}</text>
-            `;
-            return `
-                ${bar1}
-                ${bar2}
-                <text x="${centerX}" y="${plotBottom + 18}" text-anchor="middle" font-size="10" fill="#475569">${escapeHtml(item.label)}</text>
-            `;
-        }).join('');
-        const legend = `<div class="chart-legend"><div class="chart-legend-item"><span style="background:${colors[0]}"></span>${escapeHtml(seriesLabel1 || '系列一')}</div><div class="chart-legend-item"><span style="background:${colors[1]}"></span>${escapeHtml(seriesLabel2 || '系列二')}</div></div>`;
-        return wrapChartPlot(`
-            <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="双柱状图">
-                ${axes}
-                ${bars}
-            </svg>
-        `, legend);
-    }
-
+    const maxValue = Math.max(...rows.map(item => item.value), 0) || 1;
+    const barWidth = innerWidth / Math.max(rows.length, 1) * 0.6;
+    const gap = innerWidth / Math.max(rows.length, 1) * 0.4;
     const points = rows.map((item, index) => {
-        const value = parseChartNumericValue(item.value1 ?? item.value);
-        if (value == null) return null;
-        const x = slotCenters[index];
-        const y = getY(value, axisScale1);
-        return { x, y, label: item.label, value };
+        const x = padding + gap / 2 + index * (barWidth + gap) + barWidth / 2;
+        const y = padding + innerHeight - (item.value / maxValue) * innerHeight;
+        return { x, y, label: item.label, value: item.value };
     });
 
     if (chartType === 'line') {
-        const pathD = buildLinePath(points);
-        const circles = points.filter(Boolean).map((point, index) => `
+        const pathD = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+        const circles = points.map((point, index) => `
             <circle cx="${point.x}" cy="${point.y}" r="4" fill="${colors[index % colors.length]}" />
         `).join('');
-        return wrapChartPlot(`
-            <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="折线图">
-                ${axes}
+        const labels = points.map(point => `
+            <text x="${point.x}" y="${height - 6}" text-anchor="middle" font-size="10" fill="#475569">${escapeHtml(point.label)}</text>
+        `).join('');
+        return `
+            <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="折线图">
                 <path d="${pathD}" fill="none" stroke="#2f80ed" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
                 ${circles}
-                ${xLabels}
+                <line x1="${padding}" y1="${padding + innerHeight}" x2="${padding + innerWidth}" y2="${padding + innerHeight}" stroke="#cbd5e1" stroke-width="1" />
+                ${labels}
             </svg>
-        `);
+        `;
     }
 
-    const bars = points.filter(Boolean).map((point, index) => {
-        const baseY = getY(baseline1, axisScale1);
-        const heightValue = Math.abs(baseY - point.y);
+    const bars = points.map((point, index) => {
+        const heightValue = innerHeight - (point.y - padding);
         return `
-            <rect x="${point.x - barWidth / 2}" y="${Math.min(point.y, baseY)}" width="${barWidth}" height="${heightValue}" fill="${colors[index % colors.length]}" />
-            <text x="${point.x}" y="${Math.max(plotTop + 10, point.y - 6)}" text-anchor="middle" font-size="10" fill="#102a43">${formatChartAxisValue(point.value)}</text>
-            <text x="${point.x}" y="${plotBottom + 18}" text-anchor="middle" font-size="10" fill="#475569">${escapeHtml(point.label)}</text>
+            <rect x="${point.x - barWidth / 2}" y="${point.y}" width="${barWidth}" height="${heightValue}" fill="${colors[index % colors.length]}" />
+            <text x="${point.x}" y="${point.y - 6}" text-anchor="middle" font-size="10" fill="#102a43">${point.value}</text>
+            <text x="${point.x}" y="${height - 6}" text-anchor="middle" font-size="10" fill="#475569">${escapeHtml(point.label)}</text>
         `;
     }).join('');
 
-    return wrapChartPlot(`
-        <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="柱状图">
-            ${axes}
+    return `
+        <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="柱状图">
+            <line x1="${padding}" y1="${padding + innerHeight}" x2="${padding + innerWidth}" y2="${padding + innerHeight}" stroke="#cbd5e1" stroke-width="1" />
             ${bars}
         </svg>
-    `);
+    `;
 }
 
 function getChartPreviewHtml(component) {
@@ -1795,10 +852,7 @@ function getChartPreviewHtml(component) {
         <div class="chart-wrapper">
             ${title ? `<div class="chart-title">${escapeHtml(title)}</div>` : ''}
             ${chartState.sourceNote ? `<div class="chart-source-note">${escapeHtml(chartState.sourceNote)}</div>` : ''}
-            ${renderChartSvg(chartState.chartType, rows, width, height, chartState.seriesLabel1, chartState.seriesLabel2, {
-                seriesLabels: chartState.chartRows?.seriesLabels || [],
-                multiSeries: chartState.chartRows?.series || []
-            })}
+            ${renderChartSvg(chartState.chartType, rows, width, height)}
         </div>
     `;
 }
@@ -1837,54 +891,6 @@ function renderSensorMarkup(component, preview = false) {
             </div>
             <div class="agri-sensor-list">
                 ${sensorRows}
-            </div>
-        </div>
-    `;
-}
-
-function renderWeatherMarkup(component, preview = false) {
-    const mode = getWeatherDataMode(component);
-    const modeLabel = mode === WEATHER_DATA_MODE_API ? '外部 API' : '手动';
-    const lat = Number.isFinite(Number(component.props.latitude)) ? Number(component.props.latitude) : 39.9042;
-    const lon = Number.isFinite(Number(component.props.longitude)) ? Number(component.props.longitude) : 116.4074;
-    const customUrl = typeof component.props.customApiUrl === 'string' ? component.props.customApiUrl.trim() : '';
-    const rootAttrs = preview
-        ? ` data-weather-card="1" data-weather-mode="${escapeHtml(mode)}" data-latitude="${lat}" data-longitude="${lon}" data-custom-api-url="${escapeHtml(customUrl)}" data-refresh-interval="${getWeatherRefreshInterval(component)}"`
-        : '';
-
-    const p = component.props || {};
-    return `
-        <div class="weather-panel"${rootAttrs}>
-            <div class="weather-panel-head">
-                <div>
-                    <div class="weather-panel-eyebrow">Weather</div>
-                    <div class="weather-panel-title" data-field="title">${escapeHtml(p.title || '天气预报')}</div>
-                    <div class="weather-panel-subtitle" data-field="subtitle">${escapeHtml(p.subtitle || '')}</div>
-                </div>
-                <div class="weather-mode-chip">${escapeHtml(modeLabel)}</div>
-            </div>
-            <div class="weather-panel-body">
-                <div class="weather-temp-block">
-                    <span class="weather-temp-value" data-field="tempC">${escapeHtml(String(p.tempC ?? ''))}</span>
-                    <span class="weather-temp-unit">°C</span>
-                </div>
-                <div class="weather-meta-grid">
-                    <div class="weather-meta-item">
-                        <span class="weather-meta-label">天气</span>
-                        <span class="weather-meta-value" data-field="conditionText">${escapeHtml(String(p.conditionText ?? ''))}</span>
-                    </div>
-                    <div class="weather-meta-item">
-                        <span class="weather-meta-label">湿度</span>
-                        <span><span data-field="humidity">${escapeHtml(String(p.humidity ?? ''))}</span>%</span>
-                    </div>
-                    <div class="weather-meta-item">
-                        <span class="weather-meta-label">风速</span>
-                        <span><span data-field="windKmh">${escapeHtml(String(p.windKmh ?? ''))}</span> km/h</span>
-                    </div>
-                </div>
-            </div>
-            <div class="weather-panel-foot">
-                <span data-field="updatedAt">${escapeHtml(String(p.updatedAt ?? ''))}</span>
             </div>
         </div>
     `;
@@ -2095,10 +1101,6 @@ function updateCanvasStatusBar() {
     if (refs.duplicateBtn) refs.duplicateBtn.disabled = selectedCount === 0;
     if (refs.bringToFrontBtn) refs.bringToFrontBtn.disabled = selectedCount === 0;
     if (refs.deleteBtn) refs.deleteBtn.disabled = selectedCount === 0;
-    if (refs.resizeModeBtn) {
-        refs.resizeModeBtn.disabled = selectedCount === 0;
-        refs.resizeModeBtn.classList.toggle('active', state.resizeMode);
-    }
 }
 
 function setCanvasZoom(nextZoom, options = {}) {
@@ -2147,15 +1149,6 @@ function renderStage() {
             `width:${component.width}px`,
             `height:${component.height}px`
         ].join(';');
-        const resizeHandles = isComponentSelected(component.id)
-            ? `
-                <div class="resize-handle top-left" data-resize-handle="top-left"></div>
-                <div class="resize-handle top-right" data-resize-handle="top-right"></div>
-                <div class="resize-handle bottom-left" data-resize-handle="bottom-left"></div>
-                <div class="resize-handle bottom-right" data-resize-handle="bottom-right"></div>
-            `
-            : '';
-        const cursorStyle = isComponentSelected(component.id) && state.resizeMode ? 'cursor:nwse-resize;' : '';
 
         if (component.type === 'image') {
             const imageState = getImageRenderState(component);
@@ -2171,9 +1164,8 @@ function renderStage() {
                 `;
 
             return `
-                <div class="screen-component image-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${cursorStyle}">
+                <div class="screen-component image-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle}">
                     ${imageHtml}
-                    ${resizeHandles}
                 </div>
             `;
         }
@@ -2181,27 +1173,16 @@ function renderStage() {
         if (component.type === 'chart') {
             const chartHtml = getChartPreviewHtml(component);
             return `
-                <div class="screen-component chart-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${cursorStyle}padding:12px;overflow:hidden;background:#fff;">
+                <div class="screen-component chart-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:12px;overflow:hidden;background:#fff;">
                     ${chartHtml}
-                    ${resizeHandles}
                 </div>
             `;
         }
 
         if (isAgricultureComponentType(component.type)) {
             return `
-                <div class="screen-component agriculture-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${cursorStyle}padding:14px;overflow:hidden;">
+                <div class="screen-component agriculture-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:14px;overflow:hidden;">
                     ${renderAgricultureComponentMarkup(component)}
-                    ${resizeHandles}
-                </div>
-            `;
-        }
-
-        if (isWeatherComponentType(component.type)) {
-            return `
-                <div class="screen-component weather-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${cursorStyle}padding:14px;overflow:hidden;">
-                    ${renderWeatherMarkup(component)}
-                    ${resizeHandles}
                 </div>
             `;
         }
@@ -2217,12 +1198,11 @@ function renderStage() {
         ].join(';');
 
         return `
-            <div class="screen-component text-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${textStyle};${cursorStyle}">
+            <div class="screen-component text-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${textStyle}">
                 <div class="text-component-content">
                     <div class="text-main-content">${escapeHtml(textState.text)}</div>
                     ${textState.note ? `<div class="text-source-note">${escapeHtml(textState.note)}</div>` : ''}
                 </div>
-                ${resizeHandles}
             </div>
         `;
     }).join('');
@@ -2394,25 +1374,7 @@ function renderChartSettings(component) {
     const source = normalizeSource(component.props.source);
     const chartState = getChartRenderState(component);
     const headers = chartState.parsed?.headers || [];
-    const numericColumns = Array.isArray(chartState.numericColumns) ? chartState.numericColumns : [];
     const rowCount = Array.isArray(chartState.parsed?.records) ? chartState.parsed.records.length : 0;
-    const isDoubleMode = chartState.chartType === 'line-double' || chartState.chartType === 'bar-double';
-    const isMultiMode = chartState.chartType === 'line-multi' || chartState.chartType === 'bar-multi';
-    const isLineMode = chartState.chartType.startsWith('line');
-    const isBarMode = chartState.chartType.startsWith('bar');
-    const chartTypeOptions = isLineMode
-        ? [
-            { value: 'line', label: '折线图' },
-            { value: 'line-double', label: '双折线图' },
-            { value: 'line-multi', label: '多折线图' }
-        ]
-        : isBarMode
-            ? [
-                { value: 'bar', label: '柱状图' },
-                { value: 'bar-double', label: '双柱状图' },
-                { value: 'bar-multi', label: '多柱状图' }
-            ]
-            : [{ value: 'pie', label: '饼图' }];
     const csvPreview = chartState.parsed?.error
         ? `<div class="chart-error">${escapeHtml(chartState.parsed.error)}</div>`
         : chartState.sourceNote
@@ -2430,7 +1392,9 @@ function renderChartSettings(component) {
                 <div>
                     <label class="prop-label" for="chartTypeInput">图表类型</label>
                     <select class="prop-select" id="chartTypeInput">
-                        ${chartTypeOptions.map(option => `<option value="${option.value}" ${option.value === chartState.chartType ? 'selected' : ''}>${option.label}</option>`).join('')}
+                        <option value="bar" ${component.props.chartType === 'bar' ? 'selected' : ''}>柱状图</option>
+                        <option value="line" ${component.props.chartType === 'line' ? 'selected' : ''}>折线图</option>
+                        <option value="pie" ${component.props.chartType === 'pie' ? 'selected' : ''}>饼图</option>
                     </select>
                 </div>
                 <div>
@@ -2461,61 +1425,17 @@ function renderChartSettings(component) {
                         </select>
                     </div>
                     <div>
-                        <label class="prop-label" for="chartValueColumnInput">${isMultiMode ? '横坐标数值列' : '数值列'}</label>
-                        <select class="prop-select" id="chartValueColumnInput" ${numericColumns.length ? '' : 'disabled'}>
-                            ${numericColumns.length
-                                ? numericColumns.map(header => `<option value="${escapeHtml(header)}" ${header === chartState.valueColumn ? 'selected' : ''}>${escapeHtml(header)}</option>`).join('')
-                                : '<option value="" disabled>无可用数值列</option>'}
+                        <label class="prop-label" for="chartValueColumnInput">数值列</label>
+                        <select class="prop-select" id="chartValueColumnInput">
+                            ${headers.map(header => `<option value="${escapeHtml(header)}" ${header === chartState.valueColumn ? 'selected' : ''}>${escapeHtml(header)}</option>`).join('')}
                         </select>
                     </div>
-                </div>
-            ` : ''}
-            ${isMultiMode ? `
-                <div class="prop-grid">
-                    <div>
-                        <label class="prop-label" for="chartValueColumn2Input">纵坐标数值列</label>
-                        <select class="prop-select" id="chartValueColumn2Input" ${numericColumns.length > 1 ? '' : 'disabled'}>
-                            ${numericColumns.length > 1
-                                ? numericColumns.map(header => `<option value="${escapeHtml(header)}" ${header === chartState.valueColumn2 ? 'selected' : ''}>${escapeHtml(header)}</option>`).join('')
-                                : '<option value="" disabled>无可用第二数值列</option>'}
-                        </select>
-                    </div>
-                    <div>
-                        <label class="prop-label">系列说明</label>
-                        <div class="source-preview-box">每个标签值会绘制为一个独立系列</div>
-                    </div>
-                </div>
-            ` : ''}
-            ${isDoubleMode ? `
-                <div class="prop-grid">
-                    <div>
-                        <label class="prop-label" for="chartValueColumn2Input">第二数值列</label>
-                        <select class="prop-select" id="chartValueColumn2Input" ${numericColumns.length > 1 ? '' : 'disabled'}>
-                            ${numericColumns.length > 1
-                                ? numericColumns.map(header => `<option value="${escapeHtml(header)}" ${header === chartState.valueColumn2 ? 'selected' : ''}>${escapeHtml(header)}</option>`).join('')
-                                : '<option value="" disabled>无可用第二数值列</option>'}
-                        </select>
-                    </div>
-                    <div>
-                        <label class="prop-label" for="chartSeries1LabelInput">系列一名称</label>
-                        <input class="prop-input" id="chartSeries1LabelInput" type="text" value="${escapeHtml(chartState.seriesLabel1 || chartState.valueColumn || '系列一')}">
-                    </div>
-                </div>
-                <div>
-                    <label class="prop-label" for="chartSeries2LabelInput">系列二名称</label>
-                    <input class="prop-input" id="chartSeries2LabelInput" type="text" value="${escapeHtml(chartState.seriesLabel2 || chartState.valueColumn2 || '系列二')}">
                 </div>
             ` : ''}
             <p class="prop-hint">
                 ${chartState.parsed?.error
                     ? '请检查 CSV 格式是否正确。'
-                    : !headers.length
-                        ? '请先输入 CSV 数据以解析表头。'
-                        : !numericColumns.length
-                            ? '当前 CSV 中没有可用的数值列，数值列必须全部为具体数值。'
-                            : isMultiMode
-                                ? `已解析 ${rowCount} 行数据，将按标签列拆分系列，并使用两个数值列分别映射横坐标与纵坐标。`
-                            : `已解析 ${rowCount} 行数据，可切换图表类型并指定标签列与数值列。`}
+                    : `已解析 ${rowCount} 行数据，可切换图表类型并指定标签列与数值列。`}
             </p>
         </section>
     `;
@@ -2543,53 +1463,6 @@ function renderAgricultureDataSourceSection(component) {
                 <input class="prop-input" id="agriApiPathInput" type="text" value="${escapeHtml(component.props.apiPath || '')}" placeholder="/api/agriculture/sensor">
             </div>
             <p class="prop-hint">切换到“后端接口”后，运行生成网页时会按设定间隔轮询该接口，并用返回数据覆盖当前卡片展示内容。</p>
-        </section>
-    `;
-}
-
-function renderWeatherDataSourceSection(component) {
-    const p = component.props || {};
-    return `
-        <section class="prop-section">
-            <h3>外部天气数据</h3>
-            <div class="prop-grid">
-                <div>
-                    <label class="prop-label" for="weatherTitleInput">标题</label>
-                    <input class="prop-input" id="weatherTitleInput" type="text" value="${escapeHtml(p.title || '')}">
-                </div>
-                <div>
-                    <label class="prop-label" for="weatherSubtitleInput">地点</label>
-                    <input class="prop-input" id="weatherSubtitleInput" type="text" value="${escapeHtml(p.subtitle || '')}" placeholder="如：上海浦东">
-                </div>
-            </div>
-            <div class="prop-grid">
-                <div>
-                    <label class="prop-label" for="weatherDataModeInput">数据模式</label>
-                    <select class="prop-select" id="weatherDataModeInput">
-                        <option value="${SOURCE_MODE_MANUAL}" ${getWeatherDataMode(component) === SOURCE_MODE_MANUAL ? 'selected' : ''}>手动填写</option>
-                        <option value="${WEATHER_DATA_MODE_API}" ${getWeatherDataMode(component) === WEATHER_DATA_MODE_API ? 'selected' : ''}>外部接口</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="prop-label" for="weatherRefreshIntervalInput">刷新间隔(秒)</label>
-                    <input class="prop-input" id="weatherRefreshIntervalInput" type="number" min="${WEATHER_REFRESH_MIN_SEC}" max="${WEATHER_REFRESH_MAX_SEC}" value="${getWeatherRefreshInterval(component)}">
-                </div>
-            </div>
-            <div class="prop-grid">
-                <div>
-                    <label class="prop-label" for="weatherLatitudeInput">纬度</label>
-                    <input class="prop-input" id="weatherLatitudeInput" type="number" step="0.0001" value="${Number.isFinite(Number(component.props.latitude)) ? Number(component.props.latitude) : 39.9042}">
-                </div>
-                <div>
-                    <label class="prop-label" for="weatherLongitudeInput">经度</label>
-                    <input class="prop-input" id="weatherLongitudeInput" type="number" step="0.0001" value="${Number.isFinite(Number(component.props.longitude)) ? Number(component.props.longitude) : 116.4074}">
-                </div>
-            </div>
-            <div>
-                <label class="prop-label" for="weatherCustomApiUrlInput">自定义接口 URL（可选）</label>
-                <input class="prop-input" id="weatherCustomApiUrlInput" type="url" value="${escapeHtml(component.props.customApiUrl || '')}" placeholder="留空则使用 Open-Meteo（根据经纬度）">
-            </div>
-            <p class="prop-hint">外部接口模式下画布会按间隔拉取（与运行预览一致）。<strong>凡填写 Open-Meteo（<code>*.open-meteo.com</code>）任意地址，均改由本机后端带上经纬度转发</strong>，请勿依赖在自定义框里手写完整查询串。非 Open-Meteo 的第三方 URL 需自行带齐参数并允许跨域。刷新间隔最小 ${WEATHER_REFRESH_MIN_SEC} 秒。</p>
         </section>
     `;
 }
@@ -2627,7 +1500,6 @@ function renderSensorSettings(component) {
 function renderComponentDataSection(component) {
     if (usesWorkflowSource(component.type)) return renderSourceSection(component);
     if (isAgricultureComponentType(component.type)) return renderAgricultureDataSourceSection(component);
-    if (isWeatherComponentType(component.type)) return renderWeatherDataSourceSection(component);
     return '';
 }
 
@@ -2711,7 +1583,7 @@ function renderProperties() {
             </section>
             <section class="prop-section">
                 <h3>使用方式</h3>
-                <p class="prop-hint">从左侧拖拽组件到画布中。支持 Ctrl+点击多选组件，也支持在空白区域按住左键拖动进行框选；多选时右侧会显示所有选中组件的属性。除文本、图片与图表外，还支持智慧农业传感器卡与天气组件。</p>
+                <p class="prop-hint">从左侧拖拽组件到画布中。支持 Ctrl+点击多选组件，也支持在空白区域按住左键拖动进行框选；多选时右侧会显示所有选中组件的属性。除了文本、图片和图表外，还支持智慧农业专用的系统数据卡、环境监测卡和通讯状态卡。</p>
             </section>
         `;
         bindPagePropertyInputs();
@@ -2929,10 +1801,6 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
         const csvTextInput = document.getElementById('chartCsvTextInput');
         const chartLabelColumnInput = document.getElementById('chartLabelColumnInput');
         const chartValueColumnInput = document.getElementById('chartValueColumnInput');
-        const chartValueColumn2Input = document.getElementById('chartValueColumn2Input');
-        const chartGroupColumnInput = document.getElementById('chartGroupColumnInput');
-        const chartSeries1LabelInput = document.getElementById('chartSeries1LabelInput');
-        const chartSeries2LabelInput = document.getElementById('chartSeries2LabelInput');
 
         if (chartTitleInput) {
             chartTitleInput.addEventListener('input', () => {
@@ -2953,8 +1821,6 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
                 component.props.csvText = await readFileAsText(file);
                 component.props.labelColumn = '';
                 component.props.valueColumn = '';
-                component.props.valueColumn2 = '';
-                component.props.groupColumn = '';
                 renderAll();
             });
         }
@@ -2963,8 +1829,6 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
                 component.props.csvText = csvTextInput.value;
                 component.props.labelColumn = '';
                 component.props.valueColumn = '';
-                component.props.valueColumn2 = '';
-                component.props.groupColumn = '';
                 renderAll();
             });
         }
@@ -2978,93 +1842,6 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
             chartValueColumnInput.addEventListener('change', () => {
                 component.props.valueColumn = chartValueColumnInput.value;
                 renderAll();
-            });
-        }
-        if (chartValueColumn2Input) {
-            chartValueColumn2Input.addEventListener('change', () => {
-                component.props.valueColumn2 = chartValueColumn2Input.value;
-                renderAll();
-            });
-        }
-        if (chartGroupColumnInput) {
-            chartGroupColumnInput.addEventListener('change', () => {
-                component.props.groupColumn = chartGroupColumnInput.value;
-                renderAll();
-            });
-        }
-        if (chartSeries1LabelInput) {
-            chartSeries1LabelInput.addEventListener('input', () => {
-                component.props.seriesLabel1 = chartSeries1LabelInput.value;
-                renderStage();
-            });
-        }
-        if (chartSeries2LabelInput) {
-            chartSeries2LabelInput.addEventListener('input', () => {
-                component.props.seriesLabel2 = chartSeries2LabelInput.value;
-                renderStage();
-            });
-        }
-        return;
-    }
-
-    if (component.type === 'weather') {
-        const weatherTitleInput = document.getElementById('weatherTitleInput');
-        const weatherSubtitleInput = document.getElementById('weatherSubtitleInput');
-        const weatherDataModeInput = document.getElementById('weatherDataModeInput');
-        const weatherRefreshIntervalInput = document.getElementById('weatherRefreshIntervalInput');
-        const weatherLatitudeInput = document.getElementById('weatherLatitudeInput');
-        const weatherLongitudeInput = document.getElementById('weatherLongitudeInput');
-        const weatherCustomApiUrlInput = document.getElementById('weatherCustomApiUrlInput');
-
-        const bindWeatherText = (el, key) => {
-            if (!el) return;
-            el.addEventListener('input', () => {
-                component.props[key] = el.value;
-                renderStage();
-            });
-        };
-
-        bindWeatherText(weatherTitleInput, 'title');
-        bindWeatherText(weatherSubtitleInput, 'subtitle');
-
-        if (weatherDataModeInput) {
-            weatherDataModeInput.addEventListener('change', () => {
-                component.props.dataMode = weatherDataModeInput.value === WEATHER_DATA_MODE_API ? WEATHER_DATA_MODE_API : SOURCE_MODE_MANUAL;
-                component._weatherLastFetchAt = 0;
-                renderAll();
-                if (getWeatherDataMode(component) === WEATHER_DATA_MODE_API) {
-                    queueMicrotask(() => syncWeatherFromApiForComponent(component));
-                }
-            });
-        }
-        if (weatherRefreshIntervalInput) {
-            weatherRefreshIntervalInput.addEventListener('input', () => {
-                component.props.refreshInterval = clamp(
-                    Number(weatherRefreshIntervalInput.value) || 600,
-                    WEATHER_REFRESH_MIN_SEC,
-                    WEATHER_REFRESH_MAX_SEC
-                );
-                component._weatherLastFetchAt = 0;
-            });
-        }
-        if (weatherLatitudeInput) {
-            weatherLatitudeInput.addEventListener('input', () => {
-                component.props.latitude = Number(weatherLatitudeInput.value);
-                component._weatherLastFetchAt = 0;
-                renderStage();
-            });
-        }
-        if (weatherLongitudeInput) {
-            weatherLongitudeInput.addEventListener('input', () => {
-                component.props.longitude = Number(weatherLongitudeInput.value);
-                component._weatherLastFetchAt = 0;
-                renderStage();
-            });
-        }
-        if (weatherCustomApiUrlInput) {
-            weatherCustomApiUrlInput.addEventListener('input', () => {
-                component.props.customApiUrl = weatherCustomApiUrlInput.value;
-                component._weatherLastFetchAt = 0;
             });
         }
         return;
@@ -3314,17 +2091,6 @@ function bindCanvasStatusBar() {
         refs.deleteBtn.addEventListener('click', removeSelectedComponent);
     }
 
-    if (refs.resizeModeBtn) {
-        refs.resizeModeBtn.addEventListener('click', () => {
-            state.resizeMode = !state.resizeMode;
-            if (!state.resizeMode) {
-                dragState = null;
-            }
-            renderStage();
-            updateCanvasStatusBar();
-        });
-    }
-
     if (refs.zoomOutBtn) {
         refs.zoomOutBtn.addEventListener('click', () => {
             setCanvasZoom(clampCanvasZoom(state.zoom - 0.1));
@@ -3401,10 +2167,6 @@ function bindStageInteractions() {
         const component = state.components.get(componentId);
         if (!component) return;
 
-        const resizeHandleEl = event.target.closest('[data-resize-handle]');
-        const resizeHandle = resizeHandleEl ? resizeHandleEl.getAttribute('data-resize-handle') : null;
-        const isResizeAction = Boolean(resizeHandle || state.resizeMode);
-
         if (event.button !== 0) return;
         if (isToggleSelection) {
             toggleComponentSelection(componentId);
@@ -3433,13 +2195,11 @@ function bindStageInteractions() {
             ids: selectedIds,
             startX: point.x,
             startY: point.y,
-            originalById: new Map(selectedComponents.map(item => [item.id, { x: item.x, y: item.y, width: item.width, height: item.height }])),
+            originalById: new Map(selectedComponents.map(item => [item.id, { x: item.x, y: item.y }])),
             minX: Math.min(...selectedComponents.map(item => item.x)),
             minY: Math.min(...selectedComponents.map(item => item.y)),
             maxX: rightMost,
-            maxY: bottomMost,
-            resize: isResizeAction,
-            handle: resizeHandle || (state.resizeMode ? 'all' : null)
+            maxY: bottomMost
         };
 
         event.preventDefault();
@@ -3463,52 +2223,6 @@ function bindStageInteractions() {
         if (!dragState) return;
 
         const point = getPointInStage(event.clientX, event.clientY);
-        if (dragState.resize) {
-            const deltaX = point.x - dragState.startX;
-            const deltaY = point.y - dragState.startY;
-            dragState.ids.forEach(id => {
-                const component = state.components.get(id);
-                const original = dragState.originalById.get(id);
-                if (!component || !original) return;
-                let nextX = original.x;
-                let nextY = original.y;
-                let nextWidth = original.width;
-                let nextHeight = original.height;
-
-                const stageMaxWidth = state.page.width;
-                const stageMaxHeight = state.page.height;
-                const minWidth = 40;
-                const minHeight = 40;
-                const handle = dragState.handle;
-
-                if (handle === 'top-left') {
-                    nextWidth = clamp(original.width - deltaX, minWidth, original.x + original.width);
-                    nextHeight = clamp(original.height - deltaY, minHeight, original.y + original.height);
-                    nextX = original.x + (original.width - nextWidth);
-                    nextY = original.y + (original.height - nextHeight);
-                } else if (handle === 'top-right') {
-                    nextWidth = clamp(original.width + deltaX, minWidth, stageMaxWidth - original.x);
-                    nextHeight = clamp(original.height - deltaY, minHeight, original.y + original.height);
-                    nextY = original.y + (original.height - nextHeight);
-                } else if (handle === 'bottom-left') {
-                    nextWidth = clamp(original.width - deltaX, minWidth, original.x + original.width);
-                    nextHeight = clamp(original.height + deltaY, minHeight, stageMaxHeight - original.y);
-                    nextX = original.x + (original.width - nextWidth);
-                } else if (handle === 'bottom-right' || handle === 'all') {
-                    nextWidth = clamp(original.width + deltaX, minWidth, stageMaxWidth - original.x);
-                    nextHeight = clamp(original.height + deltaY, minHeight, stageMaxHeight - original.y);
-                }
-
-                component.x = nextX;
-                component.y = nextY;
-                component.width = nextWidth;
-                component.height = nextHeight;
-                constrainComponentToStage(component);
-            });
-            renderStage();
-            return;
-        }
-
         const deltaX = clamp(point.x - dragState.startX, -dragState.minX, state.page.width - dragState.maxX);
         const deltaY = clamp(point.y - dragState.startY, -dragState.minY, state.page.height - dragState.maxY);
 
@@ -3587,14 +2301,6 @@ function bindStageInteractions() {
     });
 }
 
-function resolveBackendOrigin() {
-    const m = document.querySelector('meta[name="ia-backend-origin"]');
-    const fromMeta = m?.getAttribute('content')?.trim();
-    if (fromMeta) return fromMeta.replace(/\/+$/, '');
-    if (window.location.origin) return window.location.origin;
-    return `${window.location.protocol}//${window.location.host}`;
-}
-
 function buildPreviewHtml() {
     const componentHtml = Array.from(state.components.values()).map(component => {
         if (component.type === 'image') {
@@ -3641,14 +2347,6 @@ function buildPreviewHtml() {
             `;
         }
 
-        if (isWeatherComponentType(component.type)) {
-            return `
-                <div style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;padding:14px;">
-                    ${renderWeatherMarkup(component, true)}
-                </div>
-            `;
-        }
-
         const textState = getTextRenderState(component);
         const previewDataAttrs = getPreviewDataAttributes(component);
         return `
@@ -3659,8 +2357,6 @@ function buildPreviewHtml() {
             </div>
         `;
     }).join('');
-
-    const backendOrigin = resolveBackendOrigin();
 
     return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -3692,49 +2388,18 @@ function buildPreviewHtml() {
         .chart-wrapper {
             width: 100%;
             height: 100%;
-            position: relative;
-            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
         .chart-source-note {
-            position: absolute;
-            left: 8px;
-            top: 28px;
-            z-index: 2;
-            max-width: calc(100% - 16px);
+            align-self: flex-start;
             padding: 6px 10px;
             border-radius: 999px;
             background: rgba(36, 90, 115, 0.10);
             color: #245a73;
             font-size: 11px;
             font-weight: 700;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .chart-title {
-            position: absolute;
-            left: 8px;
-            right: 8px;
-            top: 4px;
-            z-index: 2;
-            font-size: 16px;
-            font-weight: bold;
-            color: #1a202c;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            pointer-events: none;
-        }
-        .chart-plot {
-            width: 100%;
-            height: 100%;
-            position: relative;
-        }
-        .chart-svg {
-            width: 100%;
-            height: 100%;
-            display: block;
         }
         .chart-legend {
             display: grid;
@@ -3742,23 +2407,6 @@ function buildPreviewHtml() {
             margin-top: 8px;
             font-size: 11px;
             color: #475569;
-        }
-        .chart-legend-overlay {
-            position: absolute;
-            top: 6px;
-            right: 8px;
-            z-index: 3;
-            max-width: 46%;
-            max-height: 52px;
-            overflow: hidden;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            gap: 4px 8px;
-            margin-top: 0;
-            padding: 4px 6px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.78);
         }
         .chart-legend-item {
             display: inline-flex;
@@ -3915,107 +2563,12 @@ function buildPreviewHtml() {
             text-align: right;
             word-break: break-word;
         }
-        .weather-panel {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            padding: 14px 16px;
-            border-radius: 20px;
-            border: 1px solid rgba(56, 189, 248, 0.22);
-            background: linear-gradient(155deg, rgba(15, 23, 42, 0.97), rgba(30, 58, 95, 0.94));
-            color: #f0f9ff;
-            box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.08);
-            overflow: hidden;
-        }
-        .weather-panel-head {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 12px;
-        }
-        .weather-panel-eyebrow {
-            color: rgba(125, 211, 252, 0.85);
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-        .weather-panel-title {
-            font-size: 20px;
-            font-weight: 800;
-            line-height: 1.2;
-        }
-        .weather-panel-subtitle {
-            margin-top: 4px;
-            font-size: 13px;
-            color: rgba(224, 242, 254, 0.82);
-        }
-        .weather-mode-chip {
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: rgba(56, 189, 248, 0.16);
-            color: #bae6fd;
-            font-size: 11px;
-            font-weight: 700;
-            white-space: nowrap;
-        }
-        .weather-panel-body {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 16px 24px;
-            flex: 1;
-            min-height: 0;
-        }
-        .weather-temp-block {
-            display: flex;
-            align-items: flex-start;
-            gap: 2px;
-        }
-        .weather-temp-value {
-            font-size: 44px;
-            font-weight: 800;
-            line-height: 1;
-            letter-spacing: -0.02em;
-        }
-        .weather-temp-unit {
-            font-size: 18px;
-            font-weight: 700;
-            margin-top: 6px;
-            color: rgba(224, 242, 254, 0.75);
-        }
-        .weather-meta-grid {
-            display: grid;
-            gap: 8px;
-            font-size: 13px;
-        }
-        .weather-meta-item {
-            display: flex;
-            align-items: baseline;
-            gap: 10px;
-        }
-        .weather-meta-label {
-            color: rgba(186, 230, 253, 0.65);
-            min-width: 36px;
-        }
-        .weather-meta-value {
-            font-weight: 700;
-        }
-        .weather-panel-foot {
-            margin-top: auto;
-            font-size: 11px;
-            color: rgba(224, 242, 254, 0.72);
-        }
     </style>
 </head>
 <body>
     <div class="screen-page">${componentHtml}</div>
     <script>
-        const AGRI_API_ORIGIN = ${JSON.stringify(backendOrigin)};
-        const WEATHER_FORECAST_ENDPOINT = ${JSON.stringify(`${backendOrigin}/api/weather/forecast`)};
+        const AGRI_API_ORIGIN = ${JSON.stringify(window.location.origin)};
 
         function appendPreviewTimestamp(url, key = '__ts', value = Date.now()) {
             const text = String(url || '').trim();
@@ -4090,145 +2643,6 @@ function buildPreviewHtml() {
             refreshAgricultureCard(card);
             const seconds = Math.max(5, Number(card.getAttribute('data-refresh-interval')) || 30);
             window.setInterval(() => refreshAgricultureCard(card), seconds * 1000);
-        });
-
-        function setWeatherField(root, field, value) {
-            const target = root.querySelector('[data-field="' + field + '"]');
-            if (!target) return;
-            target.textContent = value == null ? '' : String(value);
-        }
-
-        function wmoWeatherLabel(code) {
-            const c = Number(code);
-            const map = {
-                0: '晴', 1: '大部晴朗', 2: '多云', 3: '阴', 45: '雾', 48: '雾',
-                51: '小毛毛雨', 53: '毛毛雨', 55: '大毛毛雨', 56: '冻毛毛雨', 57: '冻毛毛雨',
-                61: '小雨', 63: '中雨', 65: '大雨', 66: '冻雨', 67: '冻雨',
-                71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
-                80: '阵雨', 81: '强阵雨', 82: '暴雨', 85: '阵雪', 86: '阵雪',
-                95: '雷暴', 96: '雷暴伴冰雹', 99: '强雷暴伴冰雹'
-            };
-            if (!Number.isFinite(c)) return '—';
-            return map[c] || '天气';
-        }
-
-        function formatWeatherNumber(value, digits) {
-            if (value == null || !Number.isFinite(Number(value))) return '—';
-            const n = Number(value);
-            const d = Number.isFinite(digits) ? digits : 1;
-            return String(Math.round(n * Math.pow(10, d)) / Math.pow(10, d));
-        }
-
-        function applyWeatherObject(root, obj) {
-            if (!obj || typeof obj !== 'object') return;
-            if (obj.title != null) setWeatherField(root, 'title', obj.title);
-            if (obj.subtitle != null) setWeatherField(root, 'subtitle', obj.subtitle);
-            if (obj.conditionText != null) setWeatherField(root, 'conditionText', obj.conditionText);
-            if (obj.tempC != null) setWeatherField(root, 'tempC', obj.tempC);
-            if (obj.humidity != null) setWeatherField(root, 'humidity', obj.humidity);
-            if (obj.windKmh != null) setWeatherField(root, 'windKmh', obj.windKmh);
-            if (obj.updatedAt != null) setWeatherField(root, 'updatedAt', obj.updatedAt);
-        }
-
-        function applyOpenMeteoPayload(root, json) {
-            const current = json && json.current && typeof json.current === 'object' ? json.current : null;
-            if (!current) return false;
-            setWeatherField(root, 'tempC', formatWeatherNumber(current.temperature_2m, 1));
-            setWeatherField(root, 'humidity', formatWeatherNumber(current.relative_humidity_2m, 0));
-            setWeatherField(root, 'windKmh', formatWeatherNumber(current.wind_speed_10m, 1));
-            setWeatherField(root, 'conditionText', wmoWeatherLabel(current.weather_code));
-            const t = current.time ? String(current.time) : '';
-            setWeatherField(root, 'updatedAt', t ? ('观测时间 ' + t) : '已更新');
-            return true;
-        }
-
-        async function refreshWeatherCard(root) {
-            if (root.getAttribute('data-weather-mode') !== 'api') return;
-            const custom = (root.getAttribute('data-custom-api-url') || '').trim();
-            const rawLat = Number(root.getAttribute('data-latitude'));
-            const rawLon = Number(root.getAttribute('data-longitude'));
-            const lat = Number.isFinite(rawLat) ? rawLat : 30.5928;
-            const lon = Number.isFinite(rawLon) ? rawLon : 114.3055;
-
-            let url = '';
-            try {
-                function openMeteoNeedsProxy(c) {
-                    if (!c) return true;
-                    try {
-                        const u = new URL(c);
-                        return /open-meteo\\.com$/i.test(u.hostname.replace(/^www\\./, ''));
-                    } catch {
-                        return true;
-                    }
-                }
-                if (custom && !openMeteoNeedsProxy(custom)) {
-                    const abs = custom.startsWith('http://') || custom.startsWith('https://');
-                    url = abs ? custom : new URL(custom, AGRI_API_ORIGIN).toString();
-                } else {
-                    const base = String(WEATHER_FORECAST_ENDPOINT || '').replace(/\\/+$/, '');
-                    const qs = new URLSearchParams();
-                    qs.set('latitude', String(lat));
-                    qs.set('longitude', String(lon));
-                    url = base + '?' + qs.toString();
-                }
-
-                const response = await fetch(url, { cache: 'no-store' });
-                const rawText = await response.text();
-
-                function parseJsonFromText(text, label) {
-                    const t = String(text || '').trim();
-                    if (!t) {
-                        throw new Error('接口返回空内容（HTTP ' + label + '）');
-                    }
-                    try {
-                        return JSON.parse(t);
-                    } catch {
-                        throw new Error('响应不是有效 JSON（HTTP ' + label + '）');
-                    }
-                }
-
-                if (!response.ok) {
-                    let msg = String(response.status);
-                    try {
-                        const errJson = JSON.parse(rawText);
-                        if (errJson && errJson.message != null) msg = String(errJson.message);
-                        else if (errJson && errJson.error != null) msg = String(errJson.error);
-                    } catch {
-                        if (rawText && rawText.length < 200) msg = msg + ': ' + rawText;
-                    }
-                    setWeatherField(root, 'updatedAt', '加载失败: ' + msg);
-                    return;
-                }
-
-                let result;
-                try {
-                    result = parseJsonFromText(rawText, String(response.status));
-                } catch (e) {
-                    setWeatherField(root, 'updatedAt', '加载失败: ' + (e && e.message ? e.message : '解析失败'));
-                    return;
-                }
-                if (result && typeof result === 'object' && result.status === 'error' && result.message) {
-                    setWeatherField(root, 'updatedAt', '加载失败: ' + String(result.message));
-                    return;
-                }
-                const payload = result && typeof result === 'object' && result.data && typeof result.data === 'object' && !result.current
-                    ? result.data
-                    : result;
-                if (!payload || typeof payload !== 'object') return;
-
-                if (applyOpenMeteoPayload(root, payload)) return;
-                applyWeatherObject(root, payload);
-            } catch (error) {
-                console.warn('天气组件接口刷新失败', url, error);
-                setWeatherField(root, 'updatedAt', '加载失败: ' + (error && error.message ? error.message : '网络错误'));
-            }
-        }
-
-        const weatherCards = Array.from(document.querySelectorAll('[data-weather-card][data-weather-mode="api"]'));
-        weatherCards.forEach(card => {
-            refreshWeatherCard(card);
-            const seconds = Math.max(10, Number(card.getAttribute('data-refresh-interval')) || 600);
-            window.setInterval(() => refreshWeatherCard(card), seconds * 1000);
         });
     </script>
 </body>
@@ -4331,17 +2745,10 @@ function seedDemoProject() {
     chart.height = 180;
     chart.props.csvText = '指标,数值\n温度,24.6\n湿度,68\n光照,18500\n土壤湿度,45';
 
-    const weather = createWeatherComponent(520, 72);
-    weather.width = 360;
-    weather.height = 220;
-    weather.props.dataMode = WEATHER_DATA_MODE_API;
-    weather.props.subtitle = '北京（示例 · Open-Meteo）';
-
     state.components.set(title.id, title);
     state.components.set(subtitle.id, subtitle);
     state.components.set(sensor.id, sensor);
     state.components.set(chart.id, chart);
-    state.components.set(weather.id, weather);
 }
 
 function initializeProject() {
@@ -4401,7 +2808,6 @@ function init() {
     bindStageInteractions();
     bindTopbarActions();
     bindExternalRefresh();
-    window.setInterval(tickEditorWeatherSync, 1000);
     renderAll();
 }
 
