@@ -1,4 +1,4 @@
-import { listProjectsByType, listRecentProjects } from './projectRepository.js';
+import { ensureDemoProjects, listProjectsByType, listRecentProjects } from './projectRepository.js';
 
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const editorEntries = window.editorEntries || {
@@ -249,5 +249,6 @@ function bindHomeActions() {
     });
 }
 
+ensureDemoProjects();
 bindHomeActions();
 renderRecentProjects();

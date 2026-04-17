@@ -1,5 +1,5 @@
 ﻿
-import { getProjectById, listProjectsByType } from './projectRepository.js';
+import { getProjectById, listProjectsByType, touchProject } from './projectRepository.js';
 import { getWorkflowRuntime } from './workflowRuntimeStore.js';
 
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
@@ -108,7 +108,10 @@ function getTextJustifyContent(textAlign) {
 
 function getQuery() {
     const params = new URLSearchParams(window.location.search);
-    return { entry: params.get('entry') || '' };
+    return {
+        entry: params.get('entry') || '',
+        projectId: params.get('projectId') || ''
+    };
 }
 
 function getSelectedComponent() {
@@ -2654,8 +2657,17 @@ function seedDemoProject() {
 }
 
 function initializeProject() {
-    const { entry } = getQuery();
+    const { entry, projectId } = getQuery();
     if (loadImportedProjectFromSession()) return;
+
+    if (projectId) {
+        const project = getProjectById(projectId);
+        if (project?.type === 'screen' && Array.isArray(project.data?.components)) {
+            touchProject(project.id);
+            loadScreenData(project.data);
+            return;
+        }
+    }
 
     if (entry === 'create') {
         state.components.clear();

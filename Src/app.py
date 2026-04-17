@@ -51,7 +51,7 @@ register(stop_app_mqtt)
 
 smart_agriculture_mock_data = {
     'sensor': {
-        'title': '传感器数据',
+        'title': '智慧农业监测总览',
         'sensors': [
             {'name': '温度传感器', 'value': '24.6', 'unit': '°C', 'status': '正常'},
             {'name': '湿度传感器', 'value': '68', 'unit': '%', 'status': '正常'},
@@ -62,10 +62,69 @@ smart_agriculture_mock_data = {
 }
 
 
+def get_runtime_status() -> dict[str, Any]:
+    status = {
+        'connected': False,
+        'last_message_time': None,
+        'broker': '未连接',
+        'topic': '',
+        'stability': '演示模式',
+    }
+    if mqtt_handler and hasattr(mqtt_handler, 'get_connection_status'):
+        try:
+            status.update(mqtt_handler.get_connection_status())
+        except Exception:
+            pass
+    return status
+
+
+def build_live_sensor_section() -> dict[str, Any]:
+    try:
+        overview = sensor_db.get_agriculture_overview()
+        latest = overview.get('latest_reading') or {}
+        sensors = [
+            {
+                'name': '温度传感器',
+                'value': str(latest.get('temperature') if latest.get('temperature') is not None else '--'),
+                'unit': '°C',
+                'status': '告警' if overview.get('risk_score', 0) >= 75 else '正常',
+            },
+            {
+                'name': '湿度传感器',
+                'value': str(latest.get('humidity') if latest.get('humidity') is not None else '--'),
+                'unit': '%',
+                'status': '正常',
+            },
+            {
+                'name': '光照传感器',
+                'value': str(latest.get('light_lux') if latest.get('light_lux') is not None else '--'),
+                'unit': 'Lux',
+                'status': '正常',
+            },
+            {
+                'name': '土壤湿度',
+                'value': str(latest.get('soil_humidity') if latest.get('soil_humidity') is not None else '--'),
+                'unit': '%',
+                'status': '告警' if (latest.get('soil_humidity') or 0) <= 35 else '正常',
+            },
+        ]
+        return {
+            'title': '智慧农业监测总览',
+            'subtitle': overview.get('observation', ''),
+            'riskScore': overview.get('risk_score'),
+            'updatedAt': latest.get('timestamp'),
+            'sensors': sensors,
+        }
+    except Exception:
+        return {
+            **smart_agriculture_mock_data['sensor'],
+        }
+
+
 def build_smart_agriculture_payload() -> dict[str, dict[str, Any]]:
     return {
         'sensor': {
-            **smart_agriculture_mock_data['sensor'],
+            **build_live_sensor_section(),
         },
     }
 
@@ -151,6 +210,22 @@ def run_readonly_query(sql: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def get_analysis_request_args() -> tuple[str, int, int]:
+    device_id = str(request.args.get('device_id') or 'SmartAgriculture_thermometer').strip() or 'SmartAgriculture_thermometer'
+    hours = max(1, min(safe_int(request.args.get('hours'), 48), 168))
+    limit = max(1, min(safe_int(request.args.get('limit'), 8), 50))
+    return device_id, hours, limit
+
+
+def run_analysis_task(analysis_type: str, device_id: str, hours: int, limit: int) -> Any:
+    return sensor_db.run_analysis_task(
+        analysis_type=analysis_type,
+        device_id=device_id or 'SmartAgriculture_thermometer',
+        hours=max(1, hours),
+        limit=max(1, limit),
+    )
+
+
 @app.route('/')
 def home():
     return render_template('home.html')
@@ -194,6 +269,44 @@ def update_agriculture_mock():
             smart_agriculture_mock_data[section][str(key)] = '' if value is None else str(value)
 
     return jsonify({'status': 'ok', 'data': build_smart_agriculture_payload()[section]})
+
+
+@app.route('/api/agriculture/analytics/overview', methods=['GET'])
+def get_agriculture_overview():
+    device_id, _, _ = get_analysis_request_args()
+    overview = sensor_db.get_agriculture_overview(device_id=device_id)
+    overview['runtime'] = get_runtime_status()
+    overview['database'] = sensor_db.get_database_summary()
+    return jsonify({'status': 'ok', 'data': overview})
+
+
+@app.route('/api/agriculture/analytics/timeline', methods=['GET'])
+def get_agriculture_timeline():
+    device_id, hours, _ = get_analysis_request_args()
+    timeline = sensor_db.get_agriculture_timeline(device_id=device_id, hours=hours, bucket_minutes=120)
+    return jsonify({'status': 'ok', 'data': timeline})
+
+
+@app.route('/api/agriculture/analytics/alerts', methods=['GET'])
+def get_agriculture_alerts():
+    device_id, hours, limit = get_analysis_request_args()
+    alerts = sensor_db.get_agriculture_alerts(device_id=device_id, hours=hours, limit=limit)
+    return jsonify({'status': 'ok', 'data': alerts})
+
+
+@app.route('/api/agriculture/analytics/recommendations', methods=['GET'])
+def get_agriculture_recommendations():
+    device_id, _, _ = get_analysis_request_args()
+    recommendations = sensor_db.get_agriculture_recommendations(device_id=device_id)
+    return jsonify({'status': 'ok', 'data': recommendations})
+
+
+@app.route('/api/agriculture/analytics/report', methods=['GET'])
+def get_agriculture_report():
+    device_id, _, _ = get_analysis_request_args()
+    report = sensor_db.get_agriculture_report_payload(device_id=device_id)
+    report['runtime'] = get_runtime_status()
+    return jsonify({'status': 'ok', 'data': report})
 
 
 @app.route('/api/workflow/save', methods=['POST'])
@@ -313,6 +426,28 @@ def execute_workflow():
             except Exception as exc:
                 payload = []
                 add_log(f"{indent}数据库查询失败: {exc}")
+
+            written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
+            if written:
+                add_log(f"{indent}写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+            else:
+                add_log(f"{indent}未写入变量：未绑定 targetVariableId")
+            exec_node(props.get('nextNodeId'), depth)
+            return
+
+        if node_type == 'analytics_summary':
+            analysis_type = str(props.get('analysisType') or 'overview').strip() or 'overview'
+            device_id = str(props.get('deviceId') or '').strip() or 'SmartAgriculture_thermometer'
+            hours = max(1, min(safe_int(props.get('hours'), 48), 168))
+            limit = max(1, min(safe_int(props.get('limit'), 8), 50))
+            payload: Any = []
+            try:
+                payload = run_analysis_task(analysis_type, device_id, hours, limit)
+                result_size = len(payload) if isinstance(payload, list) else len(payload.keys()) if isinstance(payload, dict) else 1
+                add_log(f"{indent}分析任务完成: type={analysis_type}, size={result_size}")
+            except Exception as exc:
+                payload = []
+                add_log(f"{indent}分析任务失败: {exc}")
 
             written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
             if written:

@@ -27,6 +27,7 @@ function typeLabel(type) {
         case 'branch': return "分支";
         case 'get_sensor_info': return "获取传感器信息";
         case 'db_query': return "数据库查询";
+        case 'analytics_summary': return "农业分析摘要";
         case 'output': return "输出端口";
         default: return type;
     }
@@ -41,6 +42,7 @@ function nodeTypeIcon(type) {
         case 'branch': return '🔀';
         case 'get_sensor_info': return '🌡️';
         case 'db_query': return '🗄️';
+        case 'analytics_summary': return '📈';
         case 'output': return '📤';
         default: return '◻';
     }
@@ -667,6 +669,19 @@ export function createNode(type, x, y) {
                 breakpoint: false
             };
             break;
+        case 'analytics_summary':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                analysisType: 'overview',
+                deviceId: '',
+                hours: 48,
+                limit: 8,
+                targetVariableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
+            break;
         default: break;
     }
     return baseNode;
@@ -1134,6 +1149,29 @@ function renderNodePropertyEditor(node, options = {}) {
         html += `<div class="help-text">查询结果会写入变量。字符串变量保存 JSON 文本；整型变量保存记录条数。</div>`;
         html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'analytics_summary') {
+        const analysisType = props.analysisType || 'overview';
+        html += `<div class="prop-group"><label class="prop-label">分析任务</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="analysisType">
+                <option value="overview" ${analysisType === 'overview' ? 'selected' : ''}>总览概况</option>
+                <option value="timeline" ${analysisType === 'timeline' ? 'selected' : ''}>趋势时序</option>
+                <option value="alerts" ${analysisType === 'alerts' ? 'selected' : ''}>风险告警</option>
+                <option value="recommendations" ${analysisType === 'recommendations' ? 'selected' : ''}>决策建议</option>
+                <option value="report" ${analysisType === 'report' ? 'selected' : ''}>报告摘要</option>
+            </select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">设备 ID（可选）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="deviceId" value="${escapeHtml(props.deviceId || '')}" placeholder="留空时使用默认设备"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">分析时长（小时）</label>
+            <input class="prop-input" type="number" min="1" max="168" data-node-id="${node.id}" data-field="hours" value="${props.hours ?? 48}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">结果条数上限</label>
+            <input class="prop-input" type="number" min="1" max="50" data-node-id="${node.id}" data-field="limit" value="${props.limit ?? 8}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">写入变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">用于低代码编排智慧农业分析结果，可直接输出总览、趋势、告警、建议和报告摘要。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     }
 
     if (!options.collapsible) return html;
@@ -1202,7 +1240,7 @@ function renderPropertiesPanel() {
             const beforeSnapshot = snapshotCanvasState();
 
             let val = el.value;
-            if (field === "loopCount" || field === "limit") val = parseInt(val, 10) || 1;
+            if (field === "loopCount" || field === "limit" || field === "hours") val = parseInt(val, 10) || 1;
             if (field === "branchCondition") val = (val === "true");
             if (field === "variableId" || field === "targetVariableId") val = val === "" ? null : val;
             if (field === "name") {
@@ -1729,6 +1767,18 @@ export function renderCanvas() {
             const variable = getWorkflowVariableById(node.properties?.targetVariableId);
             bodyPreview = `SQL查询<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
         }
+        else if(node.type === 'analytics_summary') {
+            const variable = getWorkflowVariableById(node.properties?.targetVariableId);
+            const analysisLabels = {
+                overview: '总览概况',
+                timeline: '趋势时序',
+                alerts: '风险告警',
+                recommendations: '决策建议',
+                report: '报告摘要'
+            };
+            const analysisLabel = analysisLabels[node.properties?.analysisType] || '分析摘要';
+            bodyPreview = `${analysisLabel}<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
         else if(node.type === 'output') {
             const variable = getWorkflowVariableById(node.properties?.variableId);
             bodyPreview = `输出变量: ${escapeHtml(variable?.name || "未选择变量")}`;
@@ -1761,7 +1811,7 @@ export function renderCanvas() {
 
         // 端口
         let connectPointsHtml = '';
-        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query') {
+        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary') {
             connectPointsHtml = `<div class="connect-point" data-id="${node.id}" data-field="nextNodeId" style="${portStyle('nextNodeId', 50)} --cp-color:#3498db; --cp-hover-color:#2c7da0;" title="端口：下一步（next）【Shift+拖动可移动端口】"></div>`;
         } else if (node.type === 'loop') {
             connectPointsHtml = `

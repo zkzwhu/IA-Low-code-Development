@@ -177,6 +177,13 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
         lines.append(f"sql = {props.get('sql', '')!r}")
         variable = variables_by_id.get(str(props.get('targetVariableId')))
         lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
+    elif node_type == 'analytics_summary':
+        lines.append(f"analysisType = {props.get('analysisType', 'overview')!r}")
+        lines.append(f"deviceId = {props.get('deviceId', '')!r}")
+        lines.append(f"hours = {safe_int(props.get('hours', 48))}")
+        lines.append(f"limit = {safe_int(props.get('limit', 8))}")
+        variable = variables_by_id.get(str(props.get('targetVariableId')))
+        lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
 
     if props.get('nextNodeId') is not None:
         lines.append(f"nextNodeId = {props.get('nextNodeId')}")
@@ -356,6 +363,25 @@ def step_once(session: dict[str, Any]) -> tuple[list[str], bool]:
         except Exception as exc:
             payload = []
             logs.append(f"数据库查询失败: {exc}")
+        written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variables_by_id)
+        if written:
+            logs.append(f"写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+        else:
+            logs.append('未写入变量：未绑定 targetVariableId')
+        logs.extend(_goto(session, props.get('nextNodeId')))
+    elif node_type == 'analytics_summary':
+        analysis_type = str(props.get('analysisType') or 'overview').strip() or 'overview'
+        device_id = str(props.get('deviceId') or '').strip() or 'SmartAgriculture_thermometer'
+        hours = max(1, min(safe_int(props.get('hours', 48)), 168))
+        limit = max(1, min(safe_int(props.get('limit', 8)), 50))
+        payload: Any = []
+        try:
+            payload = sensor_db.run_analysis_task(analysis_type=analysis_type, device_id=device_id, hours=hours, limit=limit)
+            result_size = len(payload) if isinstance(payload, list) else len(payload.keys()) if isinstance(payload, dict) else 1
+            logs.append(f"分析任务完成: type={analysis_type}, size={result_size}")
+        except Exception as exc:
+            payload = []
+            logs.append(f"分析任务失败: {exc}")
         written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variables_by_id)
         if written:
             logs.append(f"写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
