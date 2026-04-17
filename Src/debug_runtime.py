@@ -33,7 +33,8 @@ def safe_int(value: Any, default: int = 1, minimum: int | None = 1) -> int:
 def normalize_variable_defs(variable_defs: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     normalized = []
     for index, variable in enumerate(variable_defs or []):
-        data_type = 'int' if variable.get('dataType') == 'int' else 'string'
+        raw_data_type = variable.get('dataType')
+        data_type = 'int' if raw_data_type == 'int' else ('csv' if raw_data_type == 'csv' else 'string')
         default_value = safe_int(variable.get('defaultValue'), 0, None) if data_type == 'int' else str(variable.get('defaultValue', ''))
         normalized.append({
             'id': str(variable.get('id') or f'workflow-variable-{index}'),
@@ -65,12 +66,27 @@ def resolve_variable_value(variable_id: str | None, variable_values: dict[str, A
     return '' if value is None else str(value)
 
 
+def to_csv_text(raw_value: Any) -> str:
+    if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
+        headers = list(raw_value[0].keys())
+        rows = [','.join(str(row.get(key, '')) for key in headers) for row in raw_value]
+        return ','.join(headers) + ('\n' + '\n'.join(rows) if rows else '')
+    if isinstance(raw_value, dict):
+        headers = list(raw_value.keys())
+        return ','.join(headers) + ('\n' + ','.join(str(raw_value.get(key, '')) for key in headers) if headers else '')
+    return '' if raw_value is None else str(raw_value)
+
+
 def assign_variable_value(variable_id: str | None, raw_value: Any, variable_values: dict[str, Any], variable_defs_by_id: dict[str, dict[str, Any]]) -> tuple[bool, Any]:
     variable = variable_defs_by_id.get(str(variable_id)) if variable_id else None
     if not variable:
         return False, raw_value
     if variable.get('dataType') == 'int':
         converted = safe_int(raw_value, safe_int(variable.get('defaultValue'), 0, None), None)
+        variable_values[variable['id']] = converted
+        return True, converted
+    if variable.get('dataType') == 'csv':
+        converted = to_csv_text(raw_value)
         variable_values[variable['id']] = converted
         return True, converted
     if isinstance(raw_value, (dict, list)):
