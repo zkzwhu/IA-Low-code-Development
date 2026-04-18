@@ -23,13 +23,13 @@ class MQTTHandler:
 
     def __init__(
         self,
-        broker_ip: str | None = None,
+        broker_ip: str = None,
         port: int = 1883,
         db_instance=None,
-        username: str | None = None,
-        password: str | None = None,
-        topic: str | None = None,
-        client_id: str | None = None,
+        username: str = None,
+        password: str = None,
+        topic: str = None,
+        client_id: str = None,
         use_tls: bool = False,
     ):
         """初始化MQTT处理器"""
