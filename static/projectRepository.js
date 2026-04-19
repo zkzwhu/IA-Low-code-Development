@@ -82,7 +82,7 @@ function createProjectId(type) {
     return `${type}-${Date.now()}-${randomPart}`;
 }
 
-function buildDemoNarrativeText() {
+function buildLegacyDemoNarrativeText() {
     return [
         '本演示将“数据采集、分析建模、低代码编排、大屏展示”四条主线串成一套完整闭环。',
         '工作流部分覆盖开始、打印、顺序、循环、分支、传感器读取、SQL 查询、分析摘要、抽象模型、输出端口等全部核心节点。',
@@ -95,7 +95,7 @@ function buildDemoCameraSnapshotUrl() {
     return '/api/agriculture/camera/snapshot';
 }
 
-function buildDemoLatestSensorCsv() {
+function buildLegacyDemoLatestSensorCsv() {
     return [
         'sensor,current_value,unit,status',
         '温度,24.6,°C,正常',
@@ -106,7 +106,7 @@ function buildDemoLatestSensorCsv() {
     ].join('\n');
 }
 
-function buildDemoHistoryTrendCsv() {
+function buildLegacyDemoHistoryTrendCsv() {
     return [
         'time,temperature,humidity,soil_humidity,light_lux',
         '06:00,21.8,74,51,6200',
@@ -119,7 +119,7 @@ function buildDemoHistoryTrendCsv() {
     ].join('\n');
 }
 
-function buildDemoRiskDistributionCsv() {
+function buildLegacyDemoRiskDistributionCsv() {
     return [
         'level,count',
         '正常,14',
@@ -222,7 +222,7 @@ function buildDemoModelDefaultValue() {
     });
 }
 
-function buildDemoWorkflowProject() {
+function buildLegacyDemoWorkflowProject() {
     const variableStoryId = 'demo-variable-story';
     const variableFeatureCountId = 'demo-variable-feature-count';
     const variableImageId = 'demo-variable-image';
@@ -773,7 +773,7 @@ function buildDemoWorkflowProject() {
     };
 }
 
-function buildDemoScreenProject() {
+function buildLegacyDemoScreenProject() {
     return {
         id: DEMO_SCREEN_PROJECT_ID,
         type: 'screen',
