@@ -6,6 +6,7 @@
     <meta name="ia-backend-origin" content="{{ request.host_url.rstrip('/') }}">
     <title>大屏应用编辑器</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='screenEditor.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='sharedUi.css') }}">
 </head>
 <body>
 <div class="screen-shell">
@@ -15,19 +16,25 @@
             <div>
                 <p class="topbar-eyebrow">Screen Builder</p>
                 <h1>低代码大屏编辑器</h1>
+                <div class="screen-project-badge" id="screenProjectBadge">未命名大屏项目</div>
             </div>
         </div>
         <div class="topbar-actions">
+            <button type="button" class="topbar-btn" id="openScreenLocalBtn">打开到本地</button>
+            <button type="button" class="topbar-btn" id="saveScreenLocalBtn">保存到本地</button>
+            <button type="button" class="topbar-btn" id="saveScreenCloudBtn">保存到数据库</button>
+            <button type="button" class="topbar-btn" id="downloadScreenCloudBtn">从数据库下载</button>
             <button type="button" class="topbar-btn" id="importScreenBtn">导入 JSON</button>
             <button type="button" class="topbar-btn" id="exportScreenBtn">导出 JSON</button>
             <button type="button" class="topbar-btn primary" id="runScreenBtn">运行生成网页</button>
+            <div class="shared-auth-controls" id="screenAccountControls"></div>
         </div>
     </header>
 
     <main class="editor-layout">
         <aside class="components-panel">
             <div class="panel-header">组件库</div>
-            <div class="panel-subtitle">支持文本、图片、CSV 图表、传感器数据与天气模块（Open-Meteo / 自定义接口）。</div>
+            <div class="panel-subtitle">支持文本、图片、CSV 图表、传感器数据、农业模型/气候/产量/决策组件，以及天气模块（Open-Meteo / 自定义接口）。</div>
             <div class="components-list" id="screenComponentLibrary"></div>
         </aside>
 
@@ -39,10 +46,12 @@
                     <button type="button" class="statusbar-action-btn" id="screenCutBtn">剪切</button>
                     <button type="button" class="statusbar-action-btn" id="screenPasteBtn">粘贴</button>
                     <button type="button" class="statusbar-action-btn" id="screenDuplicateBtn">复制一份</button>
+                    <button type="button" class="statusbar-action-btn" id="screenResizeModeBtn">组件缩放</button>
                     <button type="button" class="statusbar-action-btn" id="screenBringToFrontBtn">置顶</button>
                     <button type="button" class="statusbar-action-btn danger" id="screenDeleteBtn">删除</button>
                 </div>
                 <div class="statusbar-right">
+                    <span class="toolbar-pill subtle" id="screenToolModeLabel">当前：移动组件</span>
                     <button type="button" class="statusbar-btn" id="screenZoomOutBtn">-</button>
                     <button type="button" class="statusbar-btn" id="screenZoomResetBtn">100%</button>
                     <button type="button" class="statusbar-btn" id="screenZoomInBtn">+</button>

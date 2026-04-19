@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>工作流编辑器</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='sharedUi.css') }}">
 </head>
 <body>
 <div class="app-container">
@@ -16,8 +17,10 @@
             文件
             <div class="submenu">
                 <div class="submenu-item" id="newProjectBtn">新建项目</div>
-                <div class="submenu-item" id="saveProjectBtn">保存项目</div>
-                <div class="submenu-item" id="loadProjectBtn">打开项目</div>
+                <div class="submenu-item" id="saveProjectBtn">保存到本地</div>
+                <div class="submenu-item" id="saveCloudProjectBtn">保存到数据库</div>
+                <div class="submenu-item" id="loadProjectBtn">打开到本地</div>
+                <div class="submenu-item" id="downloadCloudProjectBtn">从数据库下载</div>
             </div>
         </div>
 
@@ -62,7 +65,7 @@
     <div class="main-layout">
         <div class="components-panel">
             <div class="panel-header">组件库</div>
-            <div class="components-hint">从左侧拖拽节点到画布，组合你的工作流。</div>
+            <div class="components-hint">从左侧拖拽节点到画布，组合你的工作流。农业环境抽象模型节点可直接把传感器数据转换为预测与决策可视化所需的数据契约。</div>
             <div class="components-list" id="componentsLibrary"></div>
         </div>
 

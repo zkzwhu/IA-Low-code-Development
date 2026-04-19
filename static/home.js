@@ -1,4 +1,5 @@
 import { ensureDemoProjects, listProjectsByType, listRecentProjects } from './projectRepository.js';
+import { attachAuthControls } from './authService.js';
 
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const editorEntries = window.editorEntries || {
@@ -250,5 +251,12 @@ function bindHomeActions() {
 }
 
 ensureDemoProjects();
+attachAuthControls(document.getElementById('homeAccountControls'), {
+    anonymousLabel: '未登录',
+    loginText: '登录',
+    logoutText: '退出',
+    buttonVariant: 'secondary',
+    formatUserLabel: (user) => `当前用户：${user.display_name || user.username}`,
+});
 bindHomeActions();
 renderRecentProjects();

@@ -170,6 +170,29 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
             lines.append(f"message = {props.get('message', '')!r}")
     elif node_type == 'sequence':
         lines.append(f"comment = {props.get('comment', '')!r}")
+    elif node_type == 'abstract_data_model':
+        device_id = str(props.get('deviceId') or '').strip() or 'SmartAgriculture_thermometer'
+        hours = max(24, min(safe_int(props.get('hours', 168)), 336))
+        min_points = max(12, min(safe_int(props.get('minPoints', 24)), 240))
+        payload: Any = {}
+        try:
+            payload = sensor_db.build_abstract_data_model(
+                device_id=device_id,
+                hours=hours,
+                min_points=min_points,
+            )
+            status = payload.get('status', 'unknown') if isinstance(payload, dict) else 'unknown'
+            model_name = payload.get('model_name', 'unknown') if isinstance(payload, dict) else 'unknown'
+            logs.append(f"鎶借薄鏁版嵁妯″瀷鏋勫缓瀹屾垚: status={status}, model={model_name}")
+        except Exception as exc:
+            payload = {"status": "error", "message": str(exc)}
+            logs.append(f"鎶借薄鏁版嵁妯″瀷鏋勫缓澶辫触: {exc}")
+        written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variables_by_id)
+        if written:
+            logs.append(f"鍐欏叆鍙橀噺鎴愬姛: {converted if isinstance(converted, int) else 'JSON鏂囨湰'}")
+        else:
+            logs.append('鏈啓鍏ュ彉閲忥細鏈粦瀹?targetVariableId')
+        logs.extend(_goto(session, props.get('nextNodeId')))
     elif node_type == 'loop':
         if props.get('loopConditionType') == 'expr':
             lines.append(f"loopExpr = {props.get('loopConditionExpr', '')!r}")
@@ -198,6 +221,12 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
         lines.append(f"deviceId = {props.get('deviceId', '')!r}")
         lines.append(f"hours = {safe_int(props.get('hours', 48))}")
         lines.append(f"limit = {safe_int(props.get('limit', 8))}")
+        variable = variables_by_id.get(str(props.get('targetVariableId')))
+        lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
+    elif node_type == 'abstract_data_model':
+        lines.append(f"deviceId = {props.get('deviceId', '')!r}")
+        lines.append(f"hours = {safe_int(props.get('hours', 168))}")
+        lines.append(f"minPoints = {safe_int(props.get('minPoints', 24))}")
         variable = variables_by_id.get(str(props.get('targetVariableId')))
         lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
 

@@ -72,11 +72,44 @@ body {
     line-height: 1.1;
 }
 
+.screen-project-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 12px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #dceef4;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 .topbar-actions {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+}
+
+.screen-topbar .shared-auth-badge {
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #f8fbff;
+}
+
+.screen-topbar .shared-auth-badge.muted {
+    background: rgba(255, 255, 255, 0.10);
+    color: #edf5fb;
+}
+
+.screen-topbar .shared-auth-btn.secondary {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.screen-topbar .shared-auth-btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.24);
 }
 
 .topbar-btn {
@@ -263,6 +296,13 @@ body {
     background: #ffffff;
 }
 
+.statusbar-action-btn.active {
+    border-color: rgba(36, 90, 115, 0.22);
+    background: linear-gradient(135deg, #245a73 0%, #2c7da0 100%);
+    color: #ffffff;
+    box-shadow: 0 12px 24px rgba(36, 90, 115, 0.18);
+}
+
 .statusbar-action-btn:disabled {
     opacity: 0.42;
     cursor: not-allowed;
@@ -321,6 +361,10 @@ body {
     user-select: none;
 }
 
+.canvas-area.resize-mode {
+    cursor: nwse-resize;
+}
+
 .screen-viewport {
     position: relative;
     width: 1440px;
@@ -348,6 +392,10 @@ body {
     transition: box-shadow 0.16s ease, transform 0.16s ease;
 }
 
+.screen-component.resize-ready {
+    cursor: nwse-resize;
+}
+
 .screen-component:hover {
     transform: translateY(-1px);
     box-shadow: 0 12px 24px rgba(44, 62, 80, 0.14);
@@ -355,6 +403,56 @@ body {
 
 .screen-component.selected {
     box-shadow: 0 0 0 3px rgba(44, 125, 160, 0.26), 0 18px 30px rgba(44, 125, 160, 0.18);
+}
+
+.screen-component.selected:hover,
+.screen-component.is-resizing,
+.screen-component.is-resizing:hover {
+    transform: none;
+}
+
+.screen-resize-handle {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 0 0 2px #2c7da0, 0 6px 14px rgba(44, 125, 160, 0.24);
+    z-index: 3;
+    padding: 0;
+}
+
+.screen-resize-handle::before {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: #2c7da0;
+}
+
+.screen-resize-handle-nw {
+    left: -7px;
+    top: -7px;
+    cursor: nwse-resize;
+}
+
+.screen-resize-handle-ne {
+    right: -7px;
+    top: -7px;
+    cursor: nesw-resize;
+}
+
+.screen-resize-handle-sw {
+    left: -7px;
+    bottom: -7px;
+    cursor: nesw-resize;
+}
+
+.screen-resize-handle-se {
+    right: -7px;
+    bottom: -7px;
+    cursor: nwse-resize;
 }
 
 .screen-component.weather-component {
@@ -697,6 +795,144 @@ body {
 .agri-panel-footer {
     margin-top: auto;
     color: rgba(226, 242, 247, 0.84);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.agri-model-summary,
+.agri-climate-summary,
+.agri-yield-narrative {
+    color: rgba(234, 248, 252, 0.88);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.agri-kpi-value.agri-kpi-small {
+    font-size: 16px;
+}
+
+.agri-kpi-meta {
+    color: rgba(201, 233, 240, 0.82);
+    font-size: 11px;
+}
+
+.agri-kpi-grid.agri-kpi-grid-three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agri-bar-list {
+    display: grid;
+    gap: 8px;
+}
+
+.agri-bar-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    background: rgba(230, 249, 242, 0.06);
+    border: 1px solid rgba(194, 236, 229, 0.08);
+}
+
+.agri-bar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 11px;
+    color: rgba(229, 246, 249, 0.88);
+}
+
+.agri-bar-head strong {
+    font-size: 12px;
+    color: #ffffff;
+}
+
+.agri-bar-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.10);
+    overflow: hidden;
+}
+
+.agri-bar-track span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #34d399 0%, #38bdf8 100%);
+}
+
+.agri-bar-meta {
+    color: rgba(194, 236, 229, 0.78);
+    font-size: 10px;
+}
+
+.agri-decision-top {
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(230, 249, 242, 0.08);
+    border: 1px solid rgba(194, 236, 229, 0.10);
+}
+
+.agri-decision-top-label {
+    color: rgba(194, 236, 229, 0.82);
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+.agri-decision-top-action {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.2;
+    color: #ffffff;
+}
+
+.agri-decision-top-reason {
+    margin-top: 8px;
+    color: rgba(229, 246, 249, 0.86);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.agri-decision-list {
+    display: grid;
+    gap: 8px;
+}
+
+.agri-decision-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(230, 249, 242, 0.06);
+    border: 1px solid rgba(194, 236, 229, 0.08);
+}
+
+.agri-decision-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 11px;
+    color: rgba(201, 233, 240, 0.82);
+}
+
+.agri-decision-item-head strong {
+    color: #ffffff;
+    font-size: 11px;
+}
+
+.agri-decision-item-action {
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.agri-decision-item-reason {
+    color: rgba(229, 246, 249, 0.80);
     font-size: 11px;
     line-height: 1.5;
 }

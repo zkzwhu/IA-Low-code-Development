@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     cv2 = None
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, session
 
 from debug_runtime import create_session, serialize_state, step_once
 from database import SensorDatabase
@@ -26,6 +26,14 @@ template_dir = os.path.join(current_dir, '..', 'templates')
 static_dir = os.path.join(current_dir, '..', 'static')
 
 app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'ia-low-code-dev-secret-key')
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    TEMPLATES_AUTO_RELOAD=True,
+    SEND_FILE_MAX_AGE_DEFAULT=0,
+)
+app.jinja_env.auto_reload = True
 
 current_workflow = {
     'nodes': [],
@@ -67,6 +75,58 @@ def stop_camera_capture() -> None:
 
 
 register(stop_camera_capture)
+
+
+def json_error(message: str, status_code: int = 400, error_code: str = 'REQUEST_ERROR'):
+    return jsonify({
+        'status': 'error',
+        'message': message,
+        'error_code': error_code,
+    }), status_code
+
+
+@app.after_request
+def disable_frontend_cache(response: Response) -> Response:
+    should_disable_cache = request.method == 'GET' and (
+        request.path.startswith('/static/')
+        or response.mimetype in {'text/html', 'text/css', 'application/javascript', 'text/javascript'}
+    )
+    if should_disable_cache:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+
+def get_current_user() -> dict[str, Any] | None:
+    user_id = session.get('user_id')
+    if user_id is None:
+        return None
+    user = sensor_db.get_user_by_id(user_id)
+    if not user:
+        session.pop('user_id', None)
+        return None
+    return user
+
+
+def require_login() -> tuple[dict[str, Any] | None, Any | None]:
+    user = get_current_user()
+    if user:
+        return user, None
+    return None, json_error('请先登录后再访问该功能。', 401, 'AUTH_REQUIRED')
+
+
+def serialize_user_payload(user: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not user:
+        return None
+    return {
+        'id': user.get('id'),
+        'username': user.get('username'),
+        'display_name': user.get('display_name'),
+        'created_at': user.get('created_at'),
+        'updated_at': user.get('updated_at'),
+        'last_login_at': user.get('last_login_at'),
+    }
 
 smart_agriculture_mock_data = {
     'sensor': {
@@ -487,6 +547,139 @@ def predict_agriculture_model():
         target=target,
     )
     return jsonify({'status': 'ok', 'data': prediction})
+
+
+@app.route('/api/auth/session', methods=['GET'])
+def get_auth_session():
+    user = get_current_user()
+    return jsonify({
+        'status': 'ok',
+        'authenticated': bool(user),
+        'user': serialize_user_payload(user),
+    })
+
+
+@app.route('/api/auth/register', methods=['POST'])
+def register_user():
+    payload = request.get_json() or {}
+    username = str(payload.get('username') or '').strip()
+    password = str(payload.get('password') or '')
+    display_name = str(payload.get('display_name') or '').strip()
+
+    try:
+        user = sensor_db.create_user(
+            username=username,
+            password=password,
+            display_name=display_name or username,
+        )
+    except ValueError as exc:
+        return json_error(str(exc), 400, 'VALIDATION_ERROR')
+
+    session['user_id'] = user.get('id')
+    return jsonify({
+        'status': 'ok',
+        'message': '注册成功',
+        'user': serialize_user_payload(user),
+    })
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login_user():
+    payload = request.get_json() or {}
+    username = str(payload.get('username') or '').strip()
+    password = str(payload.get('password') or '')
+    user = sensor_db.authenticate_user(username=username, password=password)
+    if not user:
+        return json_error('用户名或密码错误。', 401, 'INVALID_CREDENTIALS')
+
+    session['user_id'] = user.get('id')
+    return jsonify({
+        'status': 'ok',
+        'message': '登录成功',
+        'user': serialize_user_payload(user),
+    })
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout_user():
+    session.pop('user_id', None)
+    return jsonify({
+        'status': 'ok',
+        'message': '已退出登录',
+    })
+
+
+@app.route('/api/user-projects', methods=['GET'])
+def list_user_projects():
+    user, error_response = require_login()
+    if error_response:
+        return error_response
+
+    project_type = str(request.args.get('type') or '').strip().lower() or None
+    try:
+        projects = sensor_db.list_user_projects(user_id=int(user['id']), project_type=project_type)
+    except ValueError as exc:
+        return json_error(str(exc), 400, 'VALIDATION_ERROR')
+
+    return jsonify({
+        'status': 'ok',
+        'projects': projects,
+    })
+
+
+@app.route('/api/user-projects/<int:project_id>', methods=['GET'])
+def get_user_project(project_id: int):
+    user, error_response = require_login()
+    if error_response:
+        return error_response
+
+    project = sensor_db.get_user_project(user_id=int(user['id']), project_id=project_id, include_data=True)
+    if not project:
+        return json_error('未找到对应的数据库项目。', 404, 'PROJECT_NOT_FOUND')
+
+    return jsonify({
+        'status': 'ok',
+        'project': project,
+    })
+
+
+@app.route('/api/user-projects', methods=['POST'])
+def save_user_project():
+    user, error_response = require_login()
+    if error_response:
+        return error_response
+
+    payload = request.get_json() or {}
+    project_id = payload.get('project_id')
+    project_type = str(payload.get('project_type') or '').strip().lower()
+    project_name = str(payload.get('name') or '').strip()
+    project_data = payload.get('data')
+
+    normalized_project_id = None
+    if project_id not in (None, ''):
+        try:
+            normalized_project_id = int(project_id)
+        except (TypeError, ValueError):
+            return json_error('project_id 格式无效。', 400, 'VALIDATION_ERROR')
+
+    try:
+        project = sensor_db.save_user_project(
+            user_id=int(user['id']),
+            project_type=project_type,
+            project_name=project_name,
+            project_data=project_data,
+            project_id=normalized_project_id,
+        )
+    except ValueError as exc:
+        return json_error(str(exc), 400, 'VALIDATION_ERROR')
+    except LookupError:
+        return json_error('未找到对应的数据库项目。', 404, 'PROJECT_NOT_FOUND')
+
+    return jsonify({
+        'status': 'ok',
+        'message': '项目已保存到数据库',
+        'project': project,
+    })
 
 
 @app.route('/api/workflow/save', methods=['POST'])

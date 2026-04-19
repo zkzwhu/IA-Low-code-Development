@@ -141,6 +141,27 @@ body {
     gap: 10px;
     flex-wrap: wrap;
 }
+
+.menu-bar .shared-auth-badge {
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #f8fbff;
+}
+
+.menu-bar .shared-auth-badge.muted {
+    background: rgba(255, 255, 255, 0.10);
+    color: #edf5fb;
+}
+
+.menu-bar .shared-auth-btn.secondary {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.menu-bar .shared-auth-btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.24);
+}
 .project-badge {
     display: inline-flex;
     align-items: center;

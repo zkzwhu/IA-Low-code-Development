@@ -5,6 +5,9 @@ import sqlite3
 import json
 import logging
 import math
+import hashlib
+import hmac
+import secrets
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -48,11 +51,14 @@ class SensorDatabase:
             self._use_demo_memory_db = True
             self._init_database()
 
+        self._ensure_default_user()
+
     def _get_connection(self):
         """获取当前线程的数据库连接"""
         if not hasattr(self._local, 'conn'):
             self._local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute("PRAGMA foreign_keys = ON")
         return self._local.conn
 
     def _init_database(self):
@@ -118,6 +124,37 @@ class SensorDatabase:
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_sensor_data_device_time 
                 ON sensor_data(device_id, timestamp)
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    display_name TEXT,
+                    password_salt TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login_at TIMESTAMP
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_projects (
+                    project_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    project_type TEXT NOT NULL,
+                    project_name TEXT NOT NULL,
+                    project_data TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_user_projects_user_type_time
+                ON user_projects(user_id, project_type, updated_at DESC)
             ''')
 
             conn.commit()
@@ -679,6 +716,179 @@ class SensorDatabase:
             "stability": _safe_round(self._metric_stability(values)),
         }
 
+    def _trend_to_label(self, trend: Any) -> str:
+        normalized = str(trend or "").strip().lower()
+        if normalized == "up":
+            return "上升"
+        if normalized == "down":
+            return "下降"
+        if normalized == "stable":
+            return "平稳"
+        return "未知"
+
+    def _score_to_level(self, value: Any) -> str:
+        score = float(value or 0)
+        if score >= 80:
+            return "优秀"
+        if score >= 65:
+            return "良好"
+        if score >= 50:
+            return "中等"
+        return "待优化"
+
+    def _rows_to_csv(self, rows: List[Dict[str, Any]], columns: List[str] | None = None) -> str:
+        if not rows:
+            return ""
+        headers = columns or list(rows[0].keys())
+        lines = [",".join(headers)]
+        for row in rows:
+            lines.append(",".join("" if row.get(key) is None else str(row.get(key)) for key in headers))
+        return "\n".join(lines)
+
+    def _build_model_screen_contract(
+        self,
+        model_name: str,
+        summary_text: str,
+        sample_count: int,
+        time_start: Any,
+        time_end: Any,
+        overview: Dict[str, Any],
+        forecast: Dict[str, Any],
+        yield_prediction: Dict[str, Any],
+        decision_engine: Dict[str, Any],
+        dimensions: List[Dict[str, Any]],
+        dominant_dimension: Dict[str, Any],
+        weakest_dimension: Dict[str, Any],
+        timeline: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        latest_reading = overview.get("latest_reading") or {}
+        forecast_predictions = forecast.get("predictions") or {}
+        temperature_prediction = forecast_predictions.get("temperature") or {}
+        humidity_prediction = forecast_predictions.get("humidity") or {}
+        soil_prediction = forecast_predictions.get("soil_humidity") or {}
+        light_prediction = forecast_predictions.get("light_lux") or {}
+        top_decision = decision_engine.get("top_decision") or {}
+        risk_score = overview.get("risk_score")
+
+        dimension_bars = [
+            {
+                "label": item.get("label"),
+                "score": item.get("score"),
+                "state": item.get("state"),
+                "level": self._score_to_level(item.get("score")),
+            }
+            for item in dimensions
+        ]
+
+        climate_cards = [
+            {
+                "key": "temperature",
+                "label": "未来6小时温度",
+                "value": temperature_prediction.get("next_6h"),
+                "unit": "°C",
+                "trend": self._trend_to_label(temperature_prediction.get("trend")),
+            },
+            {
+                "key": "humidity",
+                "label": "未来6小时湿度",
+                "value": humidity_prediction.get("next_6h"),
+                "unit": "%",
+                "trend": self._trend_to_label(humidity_prediction.get("trend")),
+            },
+            {
+                "key": "soil_humidity",
+                "label": "未来6小时土壤湿度",
+                "value": soil_prediction.get("next_6h"),
+                "unit": "%",
+                "trend": self._trend_to_label(soil_prediction.get("trend")),
+            },
+            {
+                "key": "light_lux",
+                "label": "未来6小时光照",
+                "value": light_prediction.get("next_6h"),
+                "unit": "Lux",
+                "trend": self._trend_to_label(light_prediction.get("trend")),
+            },
+        ]
+
+        decision_modules = [
+            {
+                "module": item.get("module"),
+                "action": item.get("action"),
+                "priority": item.get("priority"),
+                "score": item.get("score"),
+                "reason": item.get("reason"),
+            }
+            for item in (decision_engine.get("modules") or [])
+        ]
+
+        factor_bars = [
+            {
+                "key": key,
+                "label": label,
+                "score": value,
+                "level": self._score_to_level(value),
+            }
+            for key, label, value in [
+                ("thermal_score", "热环境适配", (yield_prediction.get("factors") or {}).get("thermal_score")),
+                ("humidity_score", "空气湿度适配", (yield_prediction.get("factors") or {}).get("humidity_score")),
+                ("soil_score", "土壤供水能力", (yield_prediction.get("factors") or {}).get("soil_score")),
+                ("light_score", "光照活跃度", (yield_prediction.get("factors") or {}).get("light_score")),
+                ("air_score", "空气洁净度", (yield_prediction.get("factors") or {}).get("air_score")),
+                ("stability_score", "环境稳定性", (yield_prediction.get("factors") or {}).get("stability_score")),
+            ]
+            if value is not None
+        ]
+
+        return {
+            "overview": {
+                "title": model_name,
+                "summary": summary_text,
+                "sample_count": sample_count,
+                "time_start": time_start,
+                "time_end": time_end,
+                "updated_at": latest_reading.get("timestamp") or time_end,
+                "climate_archetype": forecast.get("microclimate_state"),
+                "risk_score": risk_score,
+                "risk_level": self._score_to_level(risk_score),
+                "confidence": forecast.get("confidence"),
+                "dominant_dimension": dominant_dimension,
+                "weakest_dimension": weakest_dimension,
+                "latest_reading": latest_reading,
+                "dimension_bars": dimension_bars,
+            },
+            "yield_forecast": {
+                "yield_index": yield_prediction.get("yield_index"),
+                "estimated_yield_kg_per_mu": yield_prediction.get("estimated_yield_kg_per_mu"),
+                "yield_grade": yield_prediction.get("yield_grade"),
+                "narrative": yield_prediction.get("narrative"),
+                "factor_bars": factor_bars,
+            },
+            "climate_forecast": {
+                "microclimate_state": forecast.get("microclimate_state"),
+                "weather_summary": forecast.get("weather_summary"),
+                "confidence": forecast.get("confidence"),
+                "cards": climate_cards,
+                "predictions": forecast_predictions,
+            },
+            "decision_support": {
+                "risk_score": decision_engine.get("risk_score"),
+                "yield_index": decision_engine.get("yield_index"),
+                "top_decision": top_decision,
+                "decision_summary": decision_engine.get("decision_summary"),
+                "modules": decision_modules,
+            },
+            "datasets": {
+                "dimensions": dimension_bars,
+                "timeline": timeline,
+                "dimensions_csv": self._rows_to_csv(dimension_bars, ["label", "score", "state", "level"]),
+                "timeline_csv": self._rows_to_csv(
+                    timeline,
+                    ["bucket", "temperature", "humidity", "soil_humidity", "pm25", "light_lux"],
+                ),
+            },
+        }
+
     def get_agriculture_forecast(
         self,
         device_id: str = "SmartAgriculture_thermometer",
@@ -949,6 +1159,25 @@ class SensorDatabase:
         weakest_dimension = min(dimensions, key=lambda item: item["score"])
         sampling_interval = self._sampling_interval_minutes(rows)
         forecast_predictions = forecast.get("predictions") or {}
+        external_summary = (
+            f"该模型将数据集抽象为“{forecast.get('microclimate_state')}”微气候原型，"
+            f"当前最强维度为“{dominant_dimension['label']}”，最弱维度为“{weakest_dimension['label']}”。"
+        )
+        screen_contract = self._build_model_screen_contract(
+            model_name="智慧农业抽象数据模型",
+            summary_text=external_summary,
+            sample_count=len(rows),
+            time_start=rows[0].get("timestamp"),
+            time_end=rows[-1].get("timestamp"),
+            overview=overview,
+            forecast=forecast,
+            yield_prediction=yield_prediction,
+            decision_engine=decision_engine,
+            dimensions=dimensions,
+            dominant_dimension=dominant_dimension,
+            weakest_dimension=weakest_dimension,
+            timeline=timeline,
+        )
 
         model = {
             "status": "ok",
@@ -995,6 +1224,7 @@ class SensorDatabase:
                 },
             },
             "decision_outputs": decision_engine,
+            "screen_contract": screen_contract,
             "visualization_contract": {
                 "recommended_views": [
                     {"type": "line", "title": "温度与土壤湿度趋势", "x": "bucket", "y": ["temperature", "soil_humidity"]},
@@ -1004,6 +1234,7 @@ class SensorDatabase:
                 ],
                 "timeline": timeline,
                 "dimensions": dimensions,
+                "datasets": screen_contract.get("datasets"),
             },
             "external_view": {
                 "summary": (
@@ -1012,6 +1243,10 @@ class SensorDatabase:
                 ),
                 "interaction_hint": "外部系统可基于 visualization_contract 字段进行可视化渲染，并调用 predictions 与 decision_outputs 完成预测和决策展示。",
             },
+        }
+        model["external_view"] = {
+            "summary": external_summary,
+            "interaction_hint": "外部系统可直接读取 screen_contract 完成农业环境建模、产量预测、气候趋势与辅助决策可视化；需要更底层数据时可继续使用 predictions、decision_outputs 与 visualization_contract。",
         }
         return model
 
@@ -1363,6 +1598,286 @@ class SensorDatabase:
         if analysis in {"model", "abstract_model"}:
             return self.build_abstract_data_model(device_id=device_id, hours=max(24, hours), min_points=max(12, min(limit * 3, 96)))
         raise ValueError(f"Unsupported analysis type: {analysis_type}")
+
+    def _hash_password(self, password: str, salt_hex: str) -> str:
+        return hashlib.pbkdf2_hmac(
+            "sha256",
+            str(password).encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            120000,
+        ).hex()
+
+    def _public_user_row(self, row: Optional[sqlite3.Row | Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        data = dict(row)
+        return {
+            "id": int(data.get("user_id") or 0),
+            "username": str(data.get("username") or ""),
+            "display_name": str(data.get("display_name") or data.get("username") or ""),
+            "created_at": data.get("created_at"),
+            "updated_at": data.get("updated_at"),
+            "last_login_at": data.get("last_login_at"),
+        }
+
+    def _normalize_project_type(self, project_type: str) -> str:
+        normalized = str(project_type or "").strip().lower()
+        if normalized not in {"workflow", "screen"}:
+            raise ValueError("Unsupported project type")
+        return normalized
+
+    def _project_row_to_dict(self, row: sqlite3.Row | Dict[str, Any], include_data: bool = False) -> Dict[str, Any]:
+        data = dict(row)
+        project = {
+            "id": int(data.get("project_id") or 0),
+            "userId": int(data.get("user_id") or 0),
+            "type": str(data.get("project_type") or "workflow"),
+            "name": str(data.get("project_name") or "Untitled Project"),
+            "createdAt": data.get("created_at"),
+            "updatedAt": data.get("updated_at"),
+        }
+        if include_data:
+            raw_project_data = data.get("project_data")
+            try:
+                project["data"] = json.loads(raw_project_data) if raw_project_data else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                project["data"] = {}
+        return project
+
+    def create_user(self, username: str, password: str, display_name: str | None = None) -> Dict[str, Any]:
+        normalized_username = str(username or "").strip()
+        normalized_display_name = str(display_name or "").strip()
+        if len(normalized_username) < 3:
+            raise ValueError("Username must be at least 3 characters")
+        if len(str(password or "")) < 6:
+            raise ValueError("Password must be at least 6 characters")
+
+        salt_hex = secrets.token_hex(16)
+        password_hash = self._hash_password(password, salt_hex)
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat(timespec="seconds")
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO users (
+                    username, display_name, password_salt, password_hash,
+                    created_at, updated_at, last_login_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    normalized_username,
+                    normalized_display_name or normalized_username,
+                    salt_hex,
+                    password_hash,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            raise ValueError("Username already exists") from exc
+
+        return self.get_user_by_id(cursor.lastrowid) or {}
+
+    def _ensure_default_user(self) -> None:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT user_id, password_salt, password_hash
+            FROM users
+            WHERE username = ?
+            """,
+            ("root",),
+        )
+        existing = cursor.fetchone()
+        desired_salt = "0123456789abcdeffedcba9876543210"
+        desired_hash = self._hash_password("root123456", desired_salt)
+
+        if existing:
+            current_hash = str(existing["password_hash"] or "")
+            current_salt = str(existing["password_salt"] or "")
+            if current_hash == desired_hash and current_salt == desired_salt:
+                return
+
+            now = datetime.now().isoformat(timespec="seconds")
+            cursor.execute(
+                """
+                UPDATE users
+                SET display_name = ?, password_salt = ?, password_hash = ?, updated_at = ?, last_login_at = COALESCE(last_login_at, ?)
+                WHERE user_id = ?
+                """,
+                ("root", desired_salt, desired_hash, now, now, int(existing["user_id"])),
+            )
+            conn.commit()
+            logger.info("Reset default login user credentials: root")
+            return
+
+        try:
+            self.create_user(username="root", password="root123456", display_name="root")
+            logger.info("Created default login user: root")
+        except ValueError:
+            logger.warning("Default user root already exists or could not be created")
+
+    def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        normalized_username = str(username or "").strip()
+        if not normalized_username or not str(password or ""):
+            return None
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT user_id, username, display_name, password_salt, password_hash,
+                   created_at, updated_at, last_login_at
+            FROM users
+            WHERE username = ?
+            """,
+            (normalized_username,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        expected_hash = self._hash_password(password, str(row["password_salt"]))
+        if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
+            return None
+
+        now = datetime.now().isoformat(timespec="seconds")
+        cursor.execute(
+            "UPDATE users SET last_login_at = ?, updated_at = ? WHERE user_id = ?",
+            (now, now, row["user_id"]),
+        )
+        conn.commit()
+        return self.get_user_by_id(int(row["user_id"]))
+
+    def get_user_by_id(self, user_id: int | str | None) -> Optional[Dict[str, Any]]:
+        if user_id is None:
+            return None
+        try:
+            normalized_user_id = int(user_id)
+        except (TypeError, ValueError):
+            return None
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT user_id, username, display_name, created_at, updated_at, last_login_at
+            FROM users
+            WHERE user_id = ?
+            """,
+            (normalized_user_id,),
+        )
+        return self._public_user_row(cursor.fetchone())
+
+    def list_user_projects(self, user_id: int, project_type: str | None = None) -> List[Dict[str, Any]]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        params: list[Any] = [int(user_id)]
+        query = """
+            SELECT project_id, user_id, project_type, project_name, created_at, updated_at
+            FROM user_projects
+            WHERE user_id = ?
+        """
+        if project_type:
+            normalized_type = self._normalize_project_type(project_type)
+            query += " AND project_type = ?"
+            params.append(normalized_type)
+        query += " ORDER BY datetime(updated_at) DESC, project_id DESC"
+
+        cursor.execute(query, params)
+        return [self._project_row_to_dict(row, include_data=False) for row in cursor.fetchall()]
+
+    def get_user_project(self, user_id: int, project_id: int, include_data: bool = True) -> Optional[Dict[str, Any]]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT project_id, user_id, project_type, project_name, project_data, created_at, updated_at
+            FROM user_projects
+            WHERE project_id = ? AND user_id = ?
+            """,
+            (int(project_id), int(user_id)),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return self._project_row_to_dict(row, include_data=include_data)
+
+    def save_user_project(
+        self,
+        user_id: int,
+        project_type: str,
+        project_name: str,
+        project_data: Dict[str, Any],
+        project_id: int | None = None,
+    ) -> Dict[str, Any]:
+        normalized_type = self._normalize_project_type(project_type)
+        normalized_name = str(project_name or "").strip()
+        if not normalized_name:
+            raise ValueError("Project name is required")
+        if not isinstance(project_data, dict):
+            raise ValueError("Project data must be an object")
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now().isoformat(timespec="seconds")
+        serialized_data = json.dumps(project_data, ensure_ascii=False)
+        normalized_user_id = int(user_id)
+
+        if project_id is not None:
+            cursor.execute(
+                """
+                SELECT project_id
+                FROM user_projects
+                WHERE project_id = ? AND user_id = ?
+                """,
+                (int(project_id), normalized_user_id),
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                raise LookupError("Project not found")
+
+            cursor.execute(
+                """
+                UPDATE user_projects
+                SET project_type = ?, project_name = ?, project_data = ?, updated_at = ?
+                WHERE project_id = ? AND user_id = ?
+                """,
+                (
+                    normalized_type,
+                    normalized_name,
+                    serialized_data,
+                    now,
+                    int(project_id),
+                    normalized_user_id,
+                ),
+            )
+            conn.commit()
+            return self.get_user_project(normalized_user_id, int(project_id), include_data=True) or {}
+
+        cursor.execute(
+            """
+            INSERT INTO user_projects (
+                user_id, project_type, project_name, project_data, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                normalized_user_id,
+                normalized_type,
+                normalized_name,
+                serialized_data,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        return self.get_user_project(normalized_user_id, int(cursor.lastrowid), include_data=True) or {}
 
     def close(self):
         """关闭数据库连接"""

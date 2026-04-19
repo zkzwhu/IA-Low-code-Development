@@ -5,11 +5,12 @@ import { initFileMenu } from './menuFile.js';
 import { initProjectMenu } from './menuProject.js';
 import { initSettingsMenu } from './menuSettings.js';
 import { initWindowMenu } from './menuWindow.js';
+import { attachAuthControls } from './authService.js';
 import { saveWorkflowRuntime } from './workflowRuntimeStore.js';
 import { initializeWorkflowProjectFromEntry, startWorkflowAutoSave } from './workflowProjectService.js';
 
 let debugSessionId = null;
-const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output', 'get_sensor_info', 'db_query', 'analytics_summary']);
+const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output', 'get_sensor_info', 'db_query', 'analytics_summary', 'abstract_data_model']);
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
@@ -47,6 +48,7 @@ const COMPONENT_LIBRARY = [
             { type: 'get_sensor_info', icon: '🌡️', title: '获取传感器信息', desc: '读取设备列表或最近数据写入变量。' },
             { type: 'db_query', icon: '🗄️', title: '数据库查询', desc: '执行只读 SQL 并把结果写入变量。' },
             { type: 'analytics_summary', icon: '📈', title: '农业分析摘要', desc: '生成趋势、告警、建议或报告摘要并写入变量。' },
+            { type: 'abstract_data_model', icon: '🧠', title: '农业环境抽象模型', desc: '构建农业环境抽象模型，并输出产量、气候和决策所需的统一数据契约。' },
             { type: 'output', icon: '📤', title: '输出端口节点', desc: '引用本地变量并暴露给项目端口。' }
         ]
     }
@@ -341,6 +343,7 @@ function prepareDebugToolbar() {
     if (!topRight) return;
 
     topRight.innerHTML = `
+        <div class="shared-auth-controls" id="workflowAccountControls"></div>
         <div class="project-badge" id="currentProjectBadge">未命名工作流</div>
         <button class="run-button" id="runWorkflowBtn" title="运行工作流">运行工作流</button>
         <button class="run-button debug-start-button" id="startDebugBtn" title="进入调试模式">开始调试</button>
@@ -773,6 +776,13 @@ export function init() {
     renderDebugState(null);
     initializeProjectData();
     updateCurrentProjectBadge();
+    attachAuthControls(document.getElementById('workflowAccountControls'), {
+        anonymousLabel: '未登录',
+        loginText: '登录',
+        logoutText: '退出',
+        buttonVariant: 'secondary',
+        formatUserLabel: (user) => `当前用户：${user.display_name || user.username}`
+    });
     window.addEventListener('workflow-project-changed', updateCurrentProjectBadge);
     startWorkflowAutoSave();
 }

@@ -1,0 +1,281 @@
+.shared-dialog-mask {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 18, 25, 0.48);
+    z-index: 3000;
+    padding: 16px;
+}
+
+.shared-dialog {
+    width: min(560px, calc(100vw - 24px));
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 28px 80px rgba(15, 24, 33, 0.24);
+    border: 1px solid rgba(24, 36, 50, 0.08);
+}
+
+.shared-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 22px 22px 14px;
+}
+
+.shared-dialog-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: #182432;
+}
+
+.shared-dialog-subtitle {
+    margin-top: 8px;
+    color: #5f7383;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.shared-dialog-close {
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    background: rgba(24, 36, 50, 0.08);
+    color: #3a5164;
+    cursor: pointer;
+    font-size: 18px;
+}
+
+.shared-dialog-body {
+    padding: 0 22px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.shared-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 0 22px 22px;
+}
+
+.shared-dialog-btn {
+    border: none;
+    padding: 11px 18px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(36, 90, 115, 0.10);
+    color: #245a73;
+}
+
+.shared-dialog-btn.primary {
+    background: linear-gradient(135deg, #245a73 0%, #2c7da0 100%);
+    color: #ffffff;
+}
+
+.shared-dialog-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.shared-dialog-message {
+    display: none;
+    padding: 12px 14px;
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.shared-dialog-message.error {
+    display: block;
+    background: rgba(220, 38, 38, 0.08);
+    color: #b91c1c;
+}
+
+.shared-dialog-message.success {
+    display: block;
+    background: rgba(22, 163, 74, 0.08);
+    color: #166534;
+}
+
+.shared-form-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.shared-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.shared-field label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #324557;
+}
+
+.shared-input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(36, 90, 115, 0.18);
+    font-size: 14px;
+    color: #182432;
+    background: #ffffff;
+}
+
+.shared-input:focus {
+    outline: none;
+    border-color: #2c7da0;
+    box-shadow: 0 0 0 3px rgba(44, 125, 160, 0.12);
+}
+
+.shared-help-text {
+    color: #607283;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.shared-auth-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.shared-auth-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(36, 90, 115, 0.10);
+    color: #245a73;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.shared-auth-badge.muted {
+    background: rgba(107, 114, 128, 0.12);
+    color: #526273;
+}
+
+.shared-auth-btn {
+    border: none;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.18);
+    color: inherit;
+}
+
+.shared-auth-btn.primary {
+    background: linear-gradient(135deg, #245a73 0%, #2c7da0 100%);
+    color: #ffffff;
+}
+
+.shared-auth-btn.secondary {
+    background: rgba(36, 90, 115, 0.10);
+    color: #245a73;
+}
+
+.shared-choice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.shared-choice-item {
+    width: 100%;
+    border: 1px solid rgba(24, 36, 50, 0.08);
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(248, 251, 252, 0.98), rgba(240, 245, 248, 0.98));
+    padding: 16px 18px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.shared-choice-item strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 16px;
+    color: #182432;
+}
+
+.shared-choice-item span {
+    display: block;
+    color: #617485;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.shared-empty {
+    padding: 16px;
+    border-radius: 16px;
+    background: rgba(24, 36, 50, 0.05);
+    color: #617485;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.shared-progress-card {
+    display: grid;
+    gap: 14px;
+}
+
+.shared-progress-track {
+    width: 100%;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(36, 90, 115, 0.10);
+}
+
+.shared-progress-fill {
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #245a73 0%, #2c7da0 100%);
+    transition: width 0.22s ease;
+}
+
+.shared-progress-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+    color: #52697b;
+}
+
+.shared-progress-status {
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: rgba(24, 36, 50, 0.05);
+    color: #425869;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+@media (max-width: 720px) {
+    .shared-dialog-header,
+    .shared-dialog-body,
+    .shared-dialog-actions {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .shared-dialog-actions {
+        flex-wrap: wrap;
+    }
+}

@@ -1,7 +1,7 @@
 ﻿import { state, setCurrentProject, setDebugCurrentNodeId, setWorkflowPorts, setWorkflowVariables } from './appStore.js';
 import { addConsoleLog } from './appUtils.js';
 import { renderCanvas, resetCanvasHistory, setSelectedNode } from './nodeManager.js';
-import { createProjectRecord, getProjectById, listProjectsByType, saveProjectData, touchProject } from './projectRepository.js';
+import { createProjectRecord, findProjectByCloudId, getProjectById, listProjectsByType, saveProjectData, touchProject } from './projectRepository.js';
 
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
 const AUTOSAVE_INTERVAL_MS = 1800;
@@ -137,7 +137,9 @@ function setCurrentProjectFromRecord(record) {
     setCurrentProject({
         id: record.id,
         name: record.name,
-        type: record.type
+        type: record.type,
+        cloudProjectId: record.cloudProjectId || '',
+        cloudUpdatedAt: record.cloudUpdatedAt || ''
     });
 }
 
@@ -209,6 +211,42 @@ export function importWorkflowProjectData(data, { name = null, announce = true }
 
     if (announce) {
         addConsoleLog(`已导入并保存本地工作流项目：${record.name}`, 'info');
+    }
+
+    return record;
+}
+
+export function syncWorkflowProjectFromCloud(cloudProject, { announce = true } = {}) {
+    const normalized = normalizeWorkflowData(cloudProject?.data || {});
+    const existing = findProjectByCloudId('workflow', cloudProject?.id);
+    const record = existing
+        ? saveProjectData(existing.id, {
+            name: typeof cloudProject?.name === 'string' && cloudProject.name.trim()
+                ? cloudProject.name.trim()
+                : existing.name,
+            data: normalized,
+            touchOpen: true,
+            cloudProjectId: cloudProject?.id,
+            cloudUpdatedAt: cloudProject?.updatedAt || ''
+        })
+        : createProjectRecord({
+            type: 'workflow',
+            name: typeof cloudProject?.name === 'string' && cloudProject.name.trim()
+                ? cloudProject.name.trim()
+                : buildDefaultWorkflowName(),
+            data: normalized,
+            cloudProjectId: cloudProject?.id,
+            cloudUpdatedAt: cloudProject?.updatedAt || ''
+        });
+
+    if (!record) return null;
+
+    setCurrentProjectFromRecord(record);
+    applyWorkflowProjectData(record.data);
+    syncLastSavedSnapshot();
+
+    if (announce) {
+        addConsoleLog(`已同步数据库工作流到本地：${record.name}`, 'info');
     }
 
     return record;

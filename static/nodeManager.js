@@ -28,6 +28,7 @@ function typeLabel(type) {
         case 'get_sensor_info': return "获取传感器信息";
         case 'db_query': return "数据库查询";
         case 'analytics_summary': return "农业分析摘要";
+        case 'abstract_data_model': return "农业环境抽象模型";
         case 'output': return "输出端口";
         default: return type;
     }
@@ -43,6 +44,7 @@ function nodeTypeIcon(type) {
         case 'get_sensor_info': return '🌡️';
         case 'db_query': return '🗄️';
         case 'analytics_summary': return '📈';
+        case 'abstract_data_model': return '🧠';
         case 'output': return '📤';
         default: return '◻';
     }
@@ -682,6 +684,18 @@ export function createNode(type, x, y) {
                 breakpoint: false
             };
             break;
+        case 'abstract_data_model':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                deviceId: '',
+                hours: 168,
+                minPoints: 24,
+                targetVariableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
+            break;
         default: break;
     }
     return baseNode;
@@ -983,7 +997,7 @@ function getWorkflowVariableOptions(selectedId, includeNone = true) {
     return noneOption + (state.workflowVariables || [])
         .map(variable => `
             <option value="${variable.id}" ${selectedId === variable.id ? 'selected' : ''}>
-                ${escapeHtml(variable.name)} (${variable.dataType === 'int' ? '整型' : '字符串'})
+                ${escapeHtml(variable.name)} (${variable.dataType === 'int' ? '整型' : (variable.dataType === 'csv' ? 'CSV' : '字符串')})
             </option>
         `)
         .join('');
@@ -1157,6 +1171,9 @@ function renderNodePropertyEditor(node, options = {}) {
                 <option value="timeline" ${analysisType === 'timeline' ? 'selected' : ''}>趋势时序</option>
                 <option value="alerts" ${analysisType === 'alerts' ? 'selected' : ''}>风险告警</option>
                 <option value="recommendations" ${analysisType === 'recommendations' ? 'selected' : ''}>决策建议</option>
+                <option value="forecast" ${analysisType === 'forecast' ? 'selected' : ''}>气候预测</option>
+                <option value="yield" ${analysisType === 'yield' ? 'selected' : ''}>产量预测</option>
+                <option value="decision" ${analysisType === 'decision' ? 'selected' : ''}>辅助决策</option>
                 <option value="report" ${analysisType === 'report' ? 'selected' : ''}>报告摘要</option>
             </select>
         </div>`;
@@ -1170,6 +1187,19 @@ function renderNodePropertyEditor(node, options = {}) {
             <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
         </div>`;
         html += `<div class="help-text">用于低代码编排智慧农业分析结果，可直接输出总览、趋势、告警、建议和报告摘要。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'abstract_data_model') {
+        html += `<div class="prop-group"><label class="prop-label">设备 ID（可选）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="deviceId" value="${escapeHtml(props.deviceId || '')}" placeholder="留空时使用默认设备"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">分析时长（小时）</label>
+            <input class="prop-input" type="number" min="24" max="336" data-node-id="${node.id}" data-field="hours" value="${props.hours ?? 168}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">最少样本点</label>
+            <input class="prop-input" type="number" min="12" max="240" data-node-id="${node.id}" data-field="minPoints" value="${props.minPoints ?? 24}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">写入变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">该节点会自动读取历史传感器数据，构建农业环境抽象模型，并在结果中附带产量预测、气候趋势、决策建议以及适合大屏消费的 screen_contract。</div>`;
         html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     }
@@ -1240,7 +1270,7 @@ function renderPropertiesPanel() {
             const beforeSnapshot = snapshotCanvasState();
 
             let val = el.value;
-            if (field === "loopCount" || field === "limit" || field === "hours") val = parseInt(val, 10) || 1;
+            if (field === "loopCount" || field === "limit" || field === "hours" || field === "minPoints") val = parseInt(val, 10) || 1;
             if (field === "branchCondition") val = (val === "true");
             if (field === "variableId" || field === "targetVariableId") val = val === "" ? null : val;
             if (field === "name") {
@@ -1774,10 +1804,18 @@ export function renderCanvas() {
                 timeline: '趋势时序',
                 alerts: '风险告警',
                 recommendations: '决策建议',
+                forecast: '气候预测',
+                yield: '产量预测',
+                decision: '辅助决策',
                 report: '报告摘要'
             };
             const analysisLabel = analysisLabels[node.properties?.analysisType] || '分析摘要';
             bodyPreview = `${analysisLabel}<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
+        else if(node.type === 'abstract_data_model') {
+            const variable = getWorkflowVariableById(node.properties?.targetVariableId);
+            const hours = Number(node.properties?.hours) || 168;
+            bodyPreview = `建模窗口: ${hours} 小时<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
         }
         else if(node.type === 'output') {
             const variable = getWorkflowVariableById(node.properties?.variableId);
@@ -1811,7 +1849,7 @@ export function renderCanvas() {
 
         // 端口
         let connectPointsHtml = '';
-        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary') {
+        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary' || node.type === 'abstract_data_model') {
             connectPointsHtml = `<div class="connect-point" data-id="${node.id}" data-field="nextNodeId" style="${portStyle('nextNodeId', 50)} --cp-color:#3498db; --cp-hover-color:#2c7da0;" title="端口：下一步（next）【Shift+拖动可移动端口】"></div>`;
         } else if (node.type === 'loop') {
             connectPointsHtml = `

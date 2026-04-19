@@ -1,5 +1,10 @@
 ﻿
 import { getProjectById, listProjectsByType, touchProject } from './projectRepository.js';
+import { createProjectRecord, findProjectByCloudId, saveProjectData } from './projectRepository.js';
+import { attachAuthControls, requireAuthenticated } from './authService.js';
+import { getUserProject, listUserProjects, saveUserProject } from './cloudProjectService.js';
+import { showSharedDialog } from './dialogService.js';
+import { downloadCloudProjectToLocalFile } from './projectDownloadService.js';
 import { getWorkflowRuntime } from './workflowRuntimeStore.js';
 
 const IMPORT_STORAGE_KEY = 'ia-editor-import-payload';
@@ -10,6 +15,9 @@ const WEATHER_DATA_MODE_API = 'api';
 const DEFAULT_PAGE = { width: 1440, height: 900, background: '#f5f7fb' };
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
+const CANVAS_TOOL_MOVE = 'move';
+const CANVAS_TOOL_RESIZE = 'resize';
+const RESIZE_HANDLE_DIRECTIONS = ['nw', 'ne', 'sw', 'se'];
 
 const COMPONENT_LIBRARY = [
     {
@@ -49,6 +57,30 @@ const COMPONENT_LIBRARY = [
         description: '展示各类传感器的数据，包括温度、湿度、光照等。'
     },
     {
+        type: 'agri-model',
+        icon: '🧠',
+        title: '环境抽象模型',
+        description: '展示农业环境抽象模型、主导维度、风险分数与模型摘要。'
+    },
+    {
+        type: 'agri-climate',
+        icon: '🌦️',
+        title: '气候预测卡',
+        description: '展示未来气候趋势、微气候状态与关键环境预测。'
+    },
+    {
+        type: 'agri-yield',
+        icon: '🌾',
+        title: '产量预测卡',
+        description: '展示产量指数、亩产估算与影响因子评分。'
+    },
+    {
+        type: 'agri-decision',
+        icon: '🧭',
+        title: '辅助决策卡',
+        description: '展示优先决策动作、风险说明与模块建议列表。'
+    },
+    {
         type: 'weather',
         icon: '🌤️',
         title: '天气信息',
@@ -62,7 +94,8 @@ const state = {
     selectedId: null,
     selectedIds: new Set(),
     page: { ...DEFAULT_PAGE },
-    zoom: 1
+    zoom: 1,
+    activeCanvasTool: CANVAS_TOOL_MOVE
 };
 
 const refs = {
@@ -71,17 +104,25 @@ const refs = {
     viewport: document.getElementById('screenViewport'),
     stage: document.getElementById('screenStage'),
     propContent: document.getElementById('screenPropContent'),
+    openLocalBtn: document.getElementById('openScreenLocalBtn'),
+    saveLocalBtn: document.getElementById('saveScreenLocalBtn'),
+    saveCloudBtn: document.getElementById('saveScreenCloudBtn'),
+    downloadCloudBtn: document.getElementById('downloadScreenCloudBtn'),
     importBtn: document.getElementById('importScreenBtn'),
     exportBtn: document.getElementById('exportScreenBtn'),
     runBtn: document.getElementById('runScreenBtn'),
     importInput: document.getElementById('screenImportInput'),
+    projectBadge: document.getElementById('screenProjectBadge'),
+    accountControls: document.getElementById('screenAccountControls'),
     selectAllBtn: document.getElementById('screenSelectAllBtn'),
     copyBtn: document.getElementById('screenCopyBtn'),
     cutBtn: document.getElementById('screenCutBtn'),
     pasteBtn: document.getElementById('screenPasteBtn'),
     duplicateBtn: document.getElementById('screenDuplicateBtn'),
+    resizeModeBtn: document.getElementById('screenResizeModeBtn'),
     bringToFrontBtn: document.getElementById('screenBringToFrontBtn'),
     deleteBtn: document.getElementById('screenDeleteBtn'),
+    toolModeLabel: document.getElementById('screenToolModeLabel'),
     zoomOutBtn: document.getElementById('screenZoomOutBtn'),
     zoomResetBtn: document.getElementById('screenZoomResetBtn'),
     zoomInBtn: document.getElementById('screenZoomInBtn'),
@@ -97,6 +138,35 @@ let didBoxSelectMove = false;
 let boxSelectionOverlay = null;
 let componentClipboardPayload = null;
 let componentClipboardPasteCount = 0;
+let currentScreenProject = null;
+
+function formatDatePart(value) {
+    return String(value).padStart(2, '0');
+}
+
+function buildDefaultScreenProjectName() {
+    const now = new Date();
+    return `大屏项目 ${now.getFullYear()}-${formatDatePart(now.getMonth() + 1)}-${formatDatePart(now.getDate())} ${formatDatePart(now.getHours())}:${formatDatePart(now.getMinutes())}`;
+}
+
+function formatProjectTime(value) {
+    const date = new Date(value || '');
+    if (Number.isNaN(date.getTime())) return '时间未知';
+    return `${date.getFullYear()}-${formatDatePart(date.getMonth() + 1)}-${formatDatePart(date.getDate())} ${formatDatePart(date.getHours())}:${formatDatePart(date.getMinutes())}`;
+}
+
+function setCurrentScreenProject(project) {
+    currentScreenProject = project && typeof project === 'object'
+        ? { ...project }
+        : null;
+    updateScreenProjectBadge();
+}
+
+function updateScreenProjectBadge() {
+    if (!refs.projectBadge) return;
+    refs.projectBadge.textContent = currentScreenProject?.name || '未命名大屏项目';
+    refs.projectBadge.title = currentScreenProject?.name || '未命名大屏项目';
+}
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -158,8 +228,53 @@ function hasSelection() {
     return state.selectedIds.size > 0;
 }
 
+function hasSingleSelection() {
+    return state.selectedIds.size === 1 && Boolean(getSelectedComponent());
+}
+
+function isResizeToolActive() {
+    return state.activeCanvasTool === CANVAS_TOOL_RESIZE;
+}
+
+function setActiveCanvasTool(tool) {
+    state.activeCanvasTool = tool === CANVAS_TOOL_RESIZE ? CANVAS_TOOL_RESIZE : CANVAS_TOOL_MOVE;
+    updateCanvasStatusBar();
+    renderStage();
+}
+
+function toggleResizeCanvasTool() {
+    setActiveCanvasTool(isResizeToolActive() ? CANVAS_TOOL_MOVE : CANVAS_TOOL_RESIZE);
+}
+
 function isComponentSelected(componentId) {
     return state.selectedIds.has(componentId);
+}
+
+function isComponentResizeReady(componentId) {
+    return hasSingleSelection() && state.selectedId === componentId;
+}
+
+function getResizeHandleMarkup(componentId) {
+    if (!isComponentResizeReady(componentId)) return '';
+    return RESIZE_HANDLE_DIRECTIONS.map(direction => `
+        <button
+            type="button"
+            class="screen-resize-handle screen-resize-handle-${direction}"
+            data-resize-handle="${direction}"
+            tabindex="-1"
+            aria-hidden="true"
+        ></button>
+    `).join('');
+}
+
+function getStageComponentClassNames(componentId) {
+    const classNames = ['screen-component'];
+    if (isComponentSelected(componentId)) classNames.push('selected');
+    if (isResizeToolActive() && isComponentResizeReady(componentId)) classNames.push('resize-ready');
+    if (dragState?.interaction && dragState.componentId === componentId && dragState.interaction !== 'move') {
+        classNames.push('is-resizing');
+    }
+    return classNames.join(' ');
 }
 
 function clearSelectedComponents() {
@@ -198,6 +313,10 @@ function getComponentTypeLabel(componentType) {
         'chart-line': '折线图表',
         'chart-pie': '饼图表',
         weather: '天气信息',
+        'agri-model': '环境抽象模型',
+        'agri-climate': '气候预测卡',
+        'agri-yield': '产量预测卡',
+        'agri-decision': '辅助决策卡',
         'agri-system': '系统数据卡',
         'agri-environment': '环境监测卡',
         'agri-communication': '通讯状态卡'
@@ -212,6 +331,9 @@ function summarizeComponentProps(component) {
     if (component.type === 'chart') return `图表类型：${component.props.chartType || 'bar'}`;
     if (component.type === 'weather') return `地点：${component.props.subtitle || '未命名'} · ${getWeatherDataMode(component) === WEATHER_DATA_MODE_API ? 'API' : '手动'}`;
     if (component.type === 'agri-sensor') return `传感器数量：${component.props.sensors?.length || 0}`;
+    if (component.type === 'agri-model' || component.type === 'agri-climate' || component.type === 'agri-yield' || component.type === 'agri-decision') {
+        return `数据模式：${normalizeSource(component.props.source).mode === SOURCE_MODE_WORKFLOW_PORT ? '工作流端口' : '手动 JSON'}`;
+    }
     return '';
 }
 
@@ -229,6 +351,86 @@ function normalizeSource(rawSource) {
         workflowProjectId: typeof rawSource?.workflowProjectId === 'string' ? rawSource.workflowProjectId : '',
         workflowPortId: typeof rawSource?.workflowPortId === 'string' ? rawSource.workflowPortId : ''
     };
+}
+
+function buildSampleAgriTwinPayload() {
+    return {
+        status: 'ok',
+        model_id: 'demo-agri-twin',
+        model_name: '智慧农业抽象数据模型',
+        screen_contract: {
+            overview: {
+                title: '智慧农业抽象数据模型',
+                summary: '样例模型已完成对温湿光土等环境变量的抽象建模，可直接驱动大屏中的建模、预测与决策组件。',
+                sample_count: 192,
+                updated_at: '2026-04-19 09:30:00',
+                climate_archetype: '稳定适生型',
+                risk_score: 68.5,
+                confidence: 84.2,
+                dominant_dimension: { label: '水分供给度', score: 82.4 },
+                weakest_dimension: { label: '空气洁净度', score: 61.8 },
+                latest_reading: {
+                    temperature: 24.6,
+                    humidity: 68.0,
+                    soil_humidity: 46.3,
+                    light_lux: 18600,
+                    timestamp: '2026-04-19 09:30:00'
+                },
+                dimension_bars: [
+                    { label: '温热稳定度', score: 78.4, state: 'high', level: '良好' },
+                    { label: '水分供给度', score: 82.4, state: 'high', level: '优秀' },
+                    { label: '光照活跃度', score: 75.8, state: 'high', level: '良好' },
+                    { label: '空气洁净度', score: 61.8, state: 'medium', level: '中等' },
+                    { label: '生长韧性', score: 73.5, state: 'medium', level: '良好' }
+                ]
+            },
+            climate_forecast: {
+                microclimate_state: '稳定适生型',
+                weather_summary: '未来 6 小时棚内温度小幅上升，空气湿度总体平稳，土壤湿度略有回落。',
+                confidence: 84.2,
+                cards: [
+                    { key: 'temperature', label: '未来6小时温度', value: 25.8, unit: '°C', trend: '上升' },
+                    { key: 'humidity', label: '未来6小时湿度', value: 67.0, unit: '%', trend: '平稳' },
+                    { key: 'soil_humidity', label: '未来6小时土壤湿度', value: 43.9, unit: '%', trend: '下降' },
+                    { key: 'light_lux', label: '未来6小时光照', value: 20400, unit: 'Lux', trend: '上升' }
+                ]
+            },
+            yield_forecast: {
+                yield_index: 76.4,
+                estimated_yield_kg_per_mu: 470.8,
+                yield_grade: '稳产潜力',
+                narrative: '当前环境条件总体适宜，若继续维持灌溉与通风协同策略，产量仍有提升空间。',
+                factor_bars: [
+                    { label: '热环境适配', score: 78.2, level: '良好' },
+                    { label: '空气湿度适配', score: 74.1, level: '良好' },
+                    { label: '土壤供水能力', score: 81.6, level: '优秀' },
+                    { label: '光照活跃度', score: 72.5, level: '良好' },
+                    { label: '环境稳定性', score: 70.8, level: '良好' }
+                ]
+            },
+            decision_support: {
+                risk_score: 68.5,
+                yield_index: 76.4,
+                decision_summary: '当前最优先动作为“择时补水”，以缓解土壤湿度未来 6 小时内继续下滑的风险。',
+                top_decision: {
+                    module: 'irrigation-controller',
+                    action: '择时补水',
+                    priority: 'P1',
+                    score: 81.2,
+                    reason: '预计未来 6 小时土壤湿度降至 43.9%，需要提前干预。'
+                },
+                modules: [
+                    { module: 'irrigation-controller', action: '择时补水', priority: 'P1', score: 81.2, reason: '预计未来 6 小时土壤湿度降至 43.9%，需要提前干预。' },
+                    { module: 'ventilation-controller', action: '保持低频通风', priority: 'P2', score: 54.6, reason: '温度略有上行，但仍处于适生区间。' },
+                    { module: 'disease-risk-evaluator', action: '维持常规巡检', priority: 'P2', score: 42.8, reason: '湿度较平稳，病害风险可控。' }
+                ]
+            }
+        }
+    };
+}
+
+function buildSampleAgriTwinJson() {
+    return JSON.stringify(buildSampleAgriTwinPayload(), null, 2);
 }
 
 function createTextComponent(x, y) {
@@ -338,6 +540,70 @@ function createSensorComponent(x, y) {
     };
 }
 
+function createAgriModelComponent(x, y) {
+    return {
+        id: state.nextId++,
+        type: 'agri-model',
+        x,
+        y,
+        width: 460,
+        height: 320,
+        props: {
+            title: '农业环境抽象模型',
+            jsonText: buildSampleAgriTwinJson(),
+            source: createDefaultSource()
+        }
+    };
+}
+
+function createAgriClimateComponent(x, y) {
+    return {
+        id: state.nextId++,
+        type: 'agri-climate',
+        x,
+        y,
+        width: 420,
+        height: 300,
+        props: {
+            title: '气候趋势预测',
+            jsonText: buildSampleAgriTwinJson(),
+            source: createDefaultSource()
+        }
+    };
+}
+
+function createAgriYieldComponent(x, y) {
+    return {
+        id: state.nextId++,
+        type: 'agri-yield',
+        x,
+        y,
+        width: 400,
+        height: 320,
+        props: {
+            title: '产量预测',
+            jsonText: buildSampleAgriTwinJson(),
+            source: createDefaultSource()
+        }
+    };
+}
+
+function createAgriDecisionComponent(x, y) {
+    return {
+        id: state.nextId++,
+        type: 'agri-decision',
+        x,
+        y,
+        width: 460,
+        height: 340,
+        props: {
+            title: '辅助决策',
+            jsonText: buildSampleAgriTwinJson(),
+            source: createDefaultSource()
+        }
+    };
+}
+
 function createComponent(type, x, y) {
     if (type === 'text') return createTextComponent(x, y);
     if (type === 'image') return createImageComponent(x, y);
@@ -346,6 +612,10 @@ function createComponent(type, x, y) {
     if (type === 'chart-pie') return createChartComponent(x, y, 'pie');
     if (type === 'chart') return createChartComponent(x, y);
     if (type === 'agri-sensor') return createSensorComponent(x, y);
+    if (type === 'agri-model') return createAgriModelComponent(x, y);
+    if (type === 'agri-climate') return createAgriClimateComponent(x, y);
+    if (type === 'agri-yield') return createAgriYieldComponent(x, y);
+    if (type === 'agri-decision') return createAgriDecisionComponent(x, y);
     if (type === 'weather') return createWeatherComponent(x, y);
     return null;
 }
@@ -359,6 +629,14 @@ function normalizeComponent(rawComponent) {
             ? 'chart'
             : rawType === 'agri-sensor'
                 ? 'agri-sensor'
+                : rawType === 'agri-model'
+                    ? 'agri-model'
+                    : rawType === 'agri-climate'
+                        ? 'agri-climate'
+                        : rawType === 'agri-yield'
+                            ? 'agri-yield'
+                            : rawType === 'agri-decision'
+                                ? 'agri-decision'
                 : rawType === 'weather'
                     ? 'weather'
                 : 'text';
@@ -369,6 +647,14 @@ function normalizeComponent(rawComponent) {
             ? createChartComponent(80, 80, rawComponent?.props?.chartType || chartType)
             : type === 'agri-sensor'
                 ? createSensorComponent(80, 80)
+                : type === 'agri-model'
+                    ? createAgriModelComponent(80, 80)
+                    : type === 'agri-climate'
+                        ? createAgriClimateComponent(80, 80)
+                        : type === 'agri-yield'
+                            ? createAgriYieldComponent(80, 80)
+                            : type === 'agri-decision'
+                                ? createAgriDecisionComponent(80, 80)
                 : type === 'weather'
                     ? createWeatherComponent(80, 80)
                 : createTextComponent(80, 80);
@@ -387,7 +673,18 @@ function normalizeComponent(rawComponent) {
 }
 
 function isAgricultureComponentType(type) {
-    return type === 'agri-sensor';
+    return type === 'agri-sensor'
+        || type === 'agri-model'
+        || type === 'agri-climate'
+        || type === 'agri-yield'
+        || type === 'agri-decision';
+}
+
+function isAgriInsightComponentType(type) {
+    return type === 'agri-model'
+        || type === 'agri-climate'
+        || type === 'agri-yield'
+        || type === 'agri-decision';
 }
 
 function isWeatherComponentType(type) {
@@ -499,16 +796,25 @@ function tickEditorWeatherSync() {
 }
 
 function usesWorkflowSource(type) {
-    return type === 'text' || type === 'image' || type === 'chart';
+    return type === 'text'
+        || type === 'image'
+        || type === 'chart'
+        || type === 'agri-model'
+        || type === 'agri-climate'
+        || type === 'agri-yield'
+        || type === 'agri-decision';
 }
 
 function getSupportedPortTypes(componentType) {
-    if (componentType === 'image' || componentType === 'chart') return ['string'];
+    if (componentType === 'image' || isAgriInsightComponentType(componentType)) return ['string'];
+    if (componentType === 'chart') return ['string', 'csv'];
     return ['string', 'int'];
 }
 
 function getPortTypeLabel(dataType) {
-    return dataType === 'int' ? '整型' : '字符串';
+    if (dataType === 'int') return '整型';
+    if (dataType === 'csv') return 'CSV';
+    return '字符串';
 }
 
 function getWorkflowPortsForProject(projectId) {
@@ -519,7 +825,7 @@ function getWorkflowPortsForProject(projectId) {
         ? project.data.workflow_ports.map((port, index) => ({
             id: String(port?.id || `workflow-port-${index}`),
             name: String(port?.name || `端口${index + 1}`),
-            dataType: port?.dataType === 'int' ? 'int' : 'string'
+            dataType: port?.dataType === 'int' ? 'int' : (port?.dataType === 'csv' ? 'csv' : 'string')
         }))
         : [];
 }
@@ -536,7 +842,7 @@ function getWorkflowProjectRuntimeContext(projectId) {
     for (const variable of variables) {
         const variableId = String(variable?.id || '');
         if (!variableId) continue;
-        const dataType = variable?.dataType === 'int' ? 'int' : 'string';
+        const dataType = variable?.dataType === 'int' ? 'int' : (variable?.dataType === 'csv' ? 'csv' : 'string');
         variableMap.set(variableId, {
             id: variableId,
             name: String(variable?.name || variableId),
@@ -708,7 +1014,8 @@ function getSourceStatusText(component) {
         const typeHint = `当前端口类型：${getPortTypeLabel(binding.port.dataType)}。`;
         let runtimeHint = ' 当前还无法解析出端口值，请检查工作流中的输出节点与变量绑定。';
         if (binding.runtimeValue?.ok) {
-            const valueText = String(binding.runtimeValue.value ?? '') || '空值';
+            const rawText = normalizeSourcePayloadText(binding.runtimeValue.value);
+            const valueText = rawText.length > 120 ? `${rawText.slice(0, 117)}...` : (rawText || '空值');
             runtimeHint = binding.runtimeValue.source === 'runtime'
                 ? ` 当前显示最近一次运行值：${valueText}。`
                 : ` 当前显示默认值：${valueText}。`;
@@ -717,7 +1024,10 @@ function getSourceStatusText(component) {
             return `${typeHint}${runtimeHint} 运行生成网页时会把该字符串端口值视为图片 URL 或 Base64 地址。`;
         }
         if (component.type === 'chart') {
-            return `${typeHint}${runtimeHint} 运行生成网页时会把该字符串端口值视为 CSV 文本，用于绘制图表。`;
+            return `${typeHint}${runtimeHint} 运行生成网页时会把该端口值视为 CSV 文本，用于绘制图表。`;
+        }
+        if (isAgriInsightComponentType(component.type)) {
+            return `${typeHint}${runtimeHint} 该组件会把字符串端口值解析为农业模型 JSON，并按模型概览、气候预测、产量预测或辅助决策视图进行渲染。`;
         }
         return `${typeHint}${runtimeHint} 文本组件支持字符串与整型端口。`;
     }
@@ -1034,6 +1344,305 @@ function getChartPreviewHtml(component) {
     `;
 }
 
+function parseStructuredJson(text) {
+    try {
+        return { ok: true, value: JSON.parse(String(text || '').trim() || '{}') };
+    } catch (error) {
+        return { ok: false, error: error?.message || 'JSON 解析失败' };
+    }
+}
+
+function unwrapStructuredPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    if (payload.data && typeof payload.data === 'object') return payload.data;
+    if (payload.prediction && typeof payload.prediction === 'object' && !payload.screen_contract) return payload.prediction;
+    return payload;
+}
+
+function normalizeSourcePayloadText(value) {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch (error) {
+        return String(value);
+    }
+}
+
+function getStructuredAgriRenderState(component) {
+    const binding = resolveWorkflowBinding(component);
+    let jsonText = component?.props?.jsonText || '';
+    let sourceNote = '';
+
+    if (binding.valid) {
+        if (binding.runtimeValue?.ok) {
+            jsonText = normalizeSourcePayloadText(binding.runtimeValue.value);
+            sourceNote = `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`;
+        } else {
+            return {
+                error: '当前工作流端口暂无可用模型数据。',
+                sourceNote: `${binding.label} · 端口值不可用`,
+                payload: null
+            };
+        }
+    } else if (binding.mode === SOURCE_MODE_WORKFLOW_PORT) {
+        return {
+            error: '请选择一个有效的字符串工作流端口。',
+            sourceNote: '',
+            payload: null
+        };
+    }
+
+    const parsed = parseStructuredJson(jsonText);
+    if (!parsed.ok) {
+        return {
+            error: `JSON 解析失败：${parsed.error}`,
+            sourceNote,
+            payload: null
+        };
+    }
+
+    const payload = unwrapStructuredPayload(parsed.value);
+    if (!payload) {
+        return {
+            error: '未解析到可用的结构化数据对象。',
+            sourceNote,
+            payload: null
+        };
+    }
+
+    return {
+        payload,
+        sourceNote,
+        error: ''
+    };
+}
+
+function formatMetricValue(value, unit = '', digits = 1) {
+    if (!Number.isFinite(Number(value))) return `--${unit ? ` ${unit}` : ''}`;
+    const numeric = Number(value);
+    const text = digits === 0 ? String(Math.round(numeric)) : numeric.toFixed(digits);
+    return `${text}${unit ? ` ${unit}` : ''}`;
+}
+
+function renderInsightBars(items = [], valueSuffix = '') {
+    return (Array.isArray(items) ? items : []).slice(0, 6).map(item => {
+        const score = Math.max(0, Math.min(100, Number(item?.score) || 0));
+        return `
+            <div class="agri-bar-item">
+                <div class="agri-bar-head">
+                    <span>${escapeHtml(String(item?.label || item?.key || '指标'))}</span>
+                    <strong>${escapeHtml(`${score.toFixed(1)}${valueSuffix}`)}</strong>
+                </div>
+                <div class="agri-bar-track"><span style="width:${score}%"></span></div>
+                ${item?.level ? `<div class="agri-bar-meta">${escapeHtml(String(item.level))}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function getAgriModelView(payload) {
+    const contract = payload?.screen_contract || {};
+    const overview = contract.overview || {};
+    const latentState = payload?.latent_state || {};
+    const datasetProfile = payload?.dataset_profile || {};
+    return {
+        title: overview.title || payload?.model_name || '农业环境抽象模型',
+        summary: overview.summary || payload?.external_view?.summary || '暂无模型摘要。',
+        climateArchetype: overview.climate_archetype || latentState.climate_archetype || '未识别',
+        riskScore: overview.risk_score,
+        confidence: overview.confidence,
+        sampleCount: overview.sample_count || datasetProfile.sample_count,
+        dominant: overview.dominant_dimension || latentState.dominant_dimension || {},
+        weakest: overview.weakest_dimension || latentState.weakest_dimension || {},
+        updatedAt: overview.updated_at || datasetProfile.time_end || '',
+        dimensionBars: overview.dimension_bars || contract.datasets?.dimensions || []
+    };
+}
+
+function getAgriClimateView(payload) {
+    const contract = payload?.screen_contract || {};
+    const climate = contract.climate_forecast || payload?.predictions?.microclimate_forecast || payload;
+    const predictions = climate?.predictions || {};
+    const cards = Array.isArray(climate?.cards) && climate.cards.length
+        ? climate.cards
+        : [
+            {
+                label: '未来6小时温度',
+                value: predictions?.temperature?.next_6h,
+                unit: '°C',
+                trend: predictions?.temperature?.trend || '未知'
+            },
+            {
+                label: '未来6小时湿度',
+                value: predictions?.humidity?.next_6h,
+                unit: '%',
+                trend: predictions?.humidity?.trend || '未知'
+            },
+            {
+                label: '未来6小时土壤湿度',
+                value: predictions?.soil_humidity?.next_6h,
+                unit: '%',
+                trend: predictions?.soil_humidity?.trend || '未知'
+            }
+        ];
+    return {
+        title: climate?.title || '气候趋势预测',
+        microclimateState: climate?.microclimate_state || payload?.latent_state?.climate_archetype || '未识别',
+        summary: climate?.weather_summary || payload?.predictions?.weather_tendency?.summary || '暂无气候趋势描述。',
+        confidence: climate?.confidence,
+        cards
+    };
+}
+
+function getAgriYieldView(payload) {
+    const contract = payload?.screen_contract || {};
+    const yieldForecast = contract.yield_forecast || payload?.predictions?.yield_projection || payload;
+    return {
+        title: yieldForecast?.title || '产量预测',
+        yieldIndex: yieldForecast?.yield_index,
+        estimatedYield: yieldForecast?.estimated_yield_kg_per_mu,
+        grade: yieldForecast?.yield_grade || '待评估',
+        narrative: yieldForecast?.narrative || '暂无产量说明。',
+        factors: yieldForecast?.factor_bars || []
+    };
+}
+
+function getAgriDecisionView(payload) {
+    const contract = payload?.screen_contract || {};
+    const decision = contract.decision_support || payload?.decision_outputs || payload;
+    return {
+        title: decision?.title || '辅助决策',
+        summary: decision?.decision_summary || '暂无决策摘要。',
+        topDecision: decision?.top_decision || {},
+        riskScore: decision?.risk_score,
+        modules: Array.isArray(decision?.modules) ? decision.modules : []
+    };
+}
+
+function renderAgriModelMarkup(component) {
+    const state = getStructuredAgriRenderState(component);
+    if (state.error) {
+        return `<div class="chart-error">${escapeHtml(state.error)}</div>`;
+    }
+    const view = getAgriModelView(state.payload);
+    return `
+        <div class="agri-panel agri-model-panel">
+            <div class="agri-panel-head">
+                <div>
+                    <div class="agri-panel-eyebrow">Agri Twin / Model</div>
+                    <div class="agri-panel-title">${escapeHtml(component.props.title || view.title)}</div>
+                </div>
+                <div class="agri-mode-chip">${escapeHtml(String(view.climateArchetype || '未识别'))}</div>
+            </div>
+            ${state.sourceNote ? `<div class="chart-source-note">${escapeHtml(state.sourceNote)}</div>` : ''}
+            <div class="agri-model-summary">${escapeHtml(view.summary || '暂无模型摘要。')}</div>
+            <div class="agri-kpi-grid">
+                <div class="agri-kpi-card"><span class="agri-kpi-label">样本量</span><span class="agri-kpi-value">${escapeHtml(String(view.sampleCount ?? '--'))}</span></div>
+                <div class="agri-kpi-card"><span class="agri-kpi-label">风险分数</span><span class="agri-kpi-value">${escapeHtml(formatMetricValue(view.riskScore, '', 1))}</span></div>
+                <div class="agri-kpi-card"><span class="agri-kpi-label">主导维度</span><span class="agri-kpi-value agri-kpi-small">${escapeHtml(String(view.dominant?.label || '--'))}</span></div>
+                <div class="agri-kpi-card"><span class="agri-kpi-label">薄弱维度</span><span class="agri-kpi-value agri-kpi-small">${escapeHtml(String(view.weakest?.label || '--'))}</span></div>
+            </div>
+            <div class="agri-bar-list">${renderInsightBars(view.dimensionBars, '')}</div>
+            <div class="agri-panel-footer">更新时间：${escapeHtml(String(view.updatedAt || '--'))} · 预测置信度 ${escapeHtml(formatMetricValue(view.confidence, '%', 1))}</div>
+        </div>
+    `;
+}
+
+function renderAgriClimateMarkup(component) {
+    const state = getStructuredAgriRenderState(component);
+    if (state.error) {
+        return `<div class="chart-error">${escapeHtml(state.error)}</div>`;
+    }
+    const view = getAgriClimateView(state.payload);
+    const cardsHtml = (view.cards || []).slice(0, 4).map(card => `
+        <div class="agri-kpi-card">
+            <span class="agri-kpi-label">${escapeHtml(String(card.label || '指标'))}</span>
+            <span class="agri-kpi-value">${escapeHtml(formatMetricValue(card.value, card.unit || '', (card.unit || '').toLowerCase() === 'lux' ? 0 : 1))}</span>
+            <span class="agri-kpi-meta">${escapeHtml(String(card.trend || '未知'))}</span>
+        </div>
+    `).join('');
+    return `
+        <div class="agri-panel agri-climate-panel">
+            <div class="agri-panel-head">
+                <div>
+                    <div class="agri-panel-eyebrow">Climate / Forecast</div>
+                    <div class="agri-panel-title">${escapeHtml(component.props.title || view.title)}</div>
+                </div>
+                <div class="agri-mode-chip">${escapeHtml(String(view.microclimateState || '未识别'))}</div>
+            </div>
+            ${state.sourceNote ? `<div class="chart-source-note">${escapeHtml(state.sourceNote)}</div>` : ''}
+            <div class="agri-climate-summary">${escapeHtml(view.summary || '暂无气候趋势说明。')}</div>
+            <div class="agri-kpi-grid agri-kpi-grid-three">${cardsHtml}</div>
+            <div class="agri-panel-footer">预测置信度 ${escapeHtml(formatMetricValue(view.confidence, '%', 1))}</div>
+        </div>
+    `;
+}
+
+function renderAgriYieldMarkup(component) {
+    const state = getStructuredAgriRenderState(component);
+    if (state.error) {
+        return `<div class="chart-error">${escapeHtml(state.error)}</div>`;
+    }
+    const view = getAgriYieldView(state.payload);
+    return `
+        <div class="agri-panel agri-yield-panel">
+            <div class="agri-panel-head">
+                <div>
+                    <div class="agri-panel-eyebrow">Yield / Forecast</div>
+                    <div class="agri-panel-title">${escapeHtml(component.props.title || view.title)}</div>
+                </div>
+                <div class="agri-mode-chip">${escapeHtml(String(view.grade || '待评估'))}</div>
+            </div>
+            ${state.sourceNote ? `<div class="chart-source-note">${escapeHtml(state.sourceNote)}</div>` : ''}
+            <div class="agri-kpi-grid">
+                <div class="agri-kpi-card"><span class="agri-kpi-label">产量指数</span><span class="agri-kpi-value">${escapeHtml(formatMetricValue(view.yieldIndex, '', 1))}</span></div>
+                <div class="agri-kpi-card"><span class="agri-kpi-label">亩产估算</span><span class="agri-kpi-value">${escapeHtml(formatMetricValue(view.estimatedYield, 'kg/亩', 1))}</span></div>
+            </div>
+            <div class="agri-yield-narrative">${escapeHtml(view.narrative || '暂无产量描述。')}</div>
+            <div class="agri-bar-list">${renderInsightBars(view.factors, '')}</div>
+        </div>
+    `;
+}
+
+function renderAgriDecisionMarkup(component) {
+    const state = getStructuredAgriRenderState(component);
+    if (state.error) {
+        return `<div class="chart-error">${escapeHtml(state.error)}</div>`;
+    }
+    const view = getAgriDecisionView(state.payload);
+    const top = view.topDecision || {};
+    const modulesHtml = (view.modules || []).slice(0, 4).map(item => `
+        <div class="agri-decision-item">
+            <div class="agri-decision-item-head">
+                <span>${escapeHtml(String(item.module || 'module'))}</span>
+                <strong>${escapeHtml(String(item.priority || 'P2'))} · ${escapeHtml(formatMetricValue(item.score, '', 1))}</strong>
+            </div>
+            <div class="agri-decision-item-action">${escapeHtml(String(item.action || '--'))}</div>
+            <div class="agri-decision-item-reason">${escapeHtml(String(item.reason || ''))}</div>
+        </div>
+    `).join('');
+    return `
+        <div class="agri-panel agri-decision-panel">
+            <div class="agri-panel-head">
+                <div>
+                    <div class="agri-panel-eyebrow">Decision / Assist</div>
+                    <div class="agri-panel-title">${escapeHtml(component.props.title || view.title)}</div>
+                </div>
+                <div class="agri-mode-chip">${escapeHtml(String(top.priority || 'P2'))}</div>
+            </div>
+            ${state.sourceNote ? `<div class="chart-source-note">${escapeHtml(state.sourceNote)}</div>` : ''}
+            <div class="agri-decision-top">
+                <div class="agri-decision-top-label">优先动作</div>
+                <div class="agri-decision-top-action">${escapeHtml(String(top.action || '--'))}</div>
+                <div class="agri-decision-top-reason">${escapeHtml(String(view.summary || top.reason || '暂无决策说明。'))}</div>
+            </div>
+            <div class="agri-panel-footer">风险分数 ${escapeHtml(formatMetricValue(view.riskScore, '', 1))}</div>
+            <div class="agri-decision-list">${modulesHtml}</div>
+        </div>
+    `;
+}
+
 function getAgricultureDataMode(component) {
     return component?.props?.dataMode === AGRI_DATA_MODE_API ? AGRI_DATA_MODE_API : SOURCE_MODE_MANUAL;
 }
@@ -1111,6 +1720,10 @@ function renderWeatherMarkup(component, preview = false) {
 
 function renderAgricultureComponentMarkup(component, preview = false) {
     if (component.type === 'agri-sensor') return renderSensorMarkup(component, preview);
+    if (component.type === 'agri-model') return renderAgriModelMarkup(component, preview);
+    if (component.type === 'agri-climate') return renderAgriClimateMarkup(component, preview);
+    if (component.type === 'agri-yield') return renderAgriYieldMarkup(component, preview);
+    if (component.type === 'agri-decision') return renderAgriDecisionMarkup(component, preview);
     return '';
 }
 
@@ -1186,6 +1799,228 @@ function downloadJson(filename, data) {
     link.download = filename;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function upsertCurrentScreenProject({
+    name = null,
+    cloudProjectId,
+    cloudUpdatedAt
+} = {}) {
+    const payload = exportScreenData();
+    const nextName = typeof name === 'string' && name.trim()
+        ? name.trim()
+        : (currentScreenProject?.name || buildDefaultScreenProjectName());
+    let record = currentScreenProject?.id ? getProjectById(currentScreenProject.id) : null;
+
+    if (!record || record.type !== 'screen') {
+        record = createProjectRecord({
+            type: 'screen',
+            name: nextName,
+            data: payload,
+            cloudProjectId,
+            cloudUpdatedAt
+        });
+    } else {
+        record = saveProjectData(record.id, {
+            name: nextName,
+            data: payload,
+            touchOpen: true,
+            cloudProjectId,
+            cloudUpdatedAt
+        });
+    }
+
+    if (record) setCurrentScreenProject(record);
+    return record;
+}
+
+function syncScreenProjectFromCloud(cloudProject) {
+    const existing = findProjectByCloudId('screen', cloudProject?.id);
+    const record = existing
+        ? saveProjectData(existing.id, {
+            name: typeof cloudProject?.name === 'string' && cloudProject.name.trim()
+                ? cloudProject.name.trim()
+                : existing.name,
+            data: cloudProject?.data && typeof cloudProject.data === 'object' ? cloudProject.data : exportScreenData(),
+            touchOpen: true,
+            cloudProjectId: cloudProject?.id,
+            cloudUpdatedAt: cloudProject?.updatedAt || ''
+        })
+        : createProjectRecord({
+            type: 'screen',
+            name: typeof cloudProject?.name === 'string' && cloudProject.name.trim()
+                ? cloudProject.name.trim()
+                : buildDefaultScreenProjectName(),
+            data: cloudProject?.data && typeof cloudProject.data === 'object' ? cloudProject.data : {},
+            cloudProjectId: cloudProject?.id,
+            cloudUpdatedAt: cloudProject?.updatedAt || ''
+        });
+
+    if (!record) return null;
+    loadScreenData(record.data);
+    setCurrentScreenProject(record);
+    renderAll();
+    return record;
+}
+
+async function promptScreenProjectName({
+    title,
+    confirmText,
+    defaultValue = '',
+    subtitle = ''
+} = {}) {
+    return showSharedDialog({
+        title,
+        subtitle,
+        bodyHtml: `
+            <div class="shared-form-grid">
+                <div class="shared-field">
+                    <label for="screenProjectNameInput">项目名称</label>
+                    <input class="shared-input" id="screenProjectNameInput" value="${escapeHtml(defaultValue)}" placeholder="请输入项目名称">
+                </div>
+            </div>
+        `,
+        confirmText,
+        cancelText: '取消',
+        onOpen: ({ bodyEl }) => {
+            bodyEl.querySelector('#screenProjectNameInput')?.focus();
+        },
+        onConfirm: ({ bodyEl, setMessage }) => {
+            const input = bodyEl.querySelector('#screenProjectNameInput');
+            const nextName = String(input?.value || '').trim();
+            if (!nextName) {
+                setMessage('请输入项目名称。', 'error');
+                return false;
+            }
+            return nextName;
+        }
+    });
+}
+
+async function openLocalScreenProjectPicker() {
+    const projects = listProjectsByType('screen');
+    await showSharedDialog({
+        title: '打开本地大屏项目',
+        subtitle: '从本地项目仓库中选择一个大屏项目继续编辑。',
+        bodyHtml: projects.length
+            ? `<div class="shared-choice-list">${projects.map(project => `
+                <button class="shared-choice-item" type="button" data-open-screen-project="${project.id}">
+                    <strong>${escapeHtml(project.name)}</strong>
+                    <span>最近活动：${escapeHtml(formatProjectTime(project.lastOpenedAt || project.updatedAt))}</span>
+                </button>
+            `).join('')}</div>`
+            : '<div class="shared-empty">当前还没有保存过本地大屏项目。</div>',
+        confirmText: '关闭',
+        showCancel: false,
+        onOpen: ({ bodyEl, close }) => {
+            bodyEl.querySelectorAll('[data-open-screen-project]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const projectId = button.getAttribute('data-open-screen-project');
+                    const project = getProjectById(projectId);
+                    if (!project || project.type !== 'screen') return;
+                    touchProject(project.id);
+                    loadScreenData(project.data);
+                    setCurrentScreenProject(getProjectById(project.id) || project);
+                    renderAll();
+                    close(true);
+                });
+            });
+        }
+    });
+}
+
+async function saveScreenProjectLocally() {
+    const nextName = await promptScreenProjectName({
+        title: '保存本地大屏项目',
+        confirmText: '保存',
+        defaultValue: currentScreenProject?.name || ''
+    });
+    if (!nextName) return;
+    upsertCurrentScreenProject({ name: nextName });
+}
+
+async function saveScreenProjectToCloud() {
+    const auth = await requireAuthenticated('保存大屏项目到数据库需要先登录。');
+    if (!auth) return;
+
+    const nextName = await promptScreenProjectName({
+        title: '保存大屏项目到数据库',
+        confirmText: '保存到数据库',
+        defaultValue: currentScreenProject?.name || '',
+        subtitle: '未登录时仍可继续编辑，只有保存到数据库或从数据库下载时需要先登录。'
+    });
+    if (!nextName) return;
+
+    const payload = exportScreenData();
+    let projectId = currentScreenProject?.cloudProjectId || null;
+    let cloudProject = null;
+
+    try {
+        cloudProject = await saveUserProject({
+            projectId,
+            projectType: 'screen',
+            name: nextName,
+            data: payload
+        });
+    } catch (error) {
+        if (projectId && error?.code === 'PROJECT_NOT_FOUND') {
+            cloudProject = await saveUserProject({
+                projectType: 'screen',
+                name: nextName,
+                data: payload
+            });
+        } else {
+            throw error;
+        }
+    }
+
+    syncScreenProjectFromCloud({
+        ...cloudProject,
+        data: payload
+    });
+}
+
+async function downloadScreenProjectFromCloud() {
+    const auth = await requireAuthenticated('下载数据库中的大屏项目文件前需要先登录。');
+    if (!auth) return;
+
+    const projects = await listUserProjects('screen');
+    await showSharedDialog({
+        title: '下载数据库项目文件',
+        subtitle: '选择一个数据库项目后，系统会把项目导出为 JSON 文件，并保存到你选择的本地目录。',
+        bodyHtml: projects.length
+            ? `<div class="shared-choice-list">${projects.map(project => `
+                <button class="shared-choice-item" type="button" data-download-screen-project="${project.id}" data-download-screen-project-name="${escapeHtml(project.name)}">
+                    <strong>${escapeHtml(project.name)}</strong>
+                    <span>更新时间：${escapeHtml(formatProjectTime(project.updatedAt))}</span>
+                </button>
+            `).join('')}</div>`
+            : '<div class="shared-empty">当前数据库中还没有可下载的大屏项目。</div>',
+        confirmText: '关闭',
+        showCancel: false,
+        onOpen: ({ bodyEl, close }) => {
+            bodyEl.querySelectorAll('[data-download-screen-project]').forEach((button) => {
+                button.addEventListener('click', async () => {
+                    try {
+                        const projectId = button.getAttribute('data-download-screen-project');
+                        const projectName = button.getAttribute('data-download-screen-project-name') || 'screen-project';
+                        close(true);
+                        const result = await downloadCloudProjectToLocalFile({
+                            projectId,
+                            projectType: 'screen',
+                            projectName,
+                            loadProject: getUserProject
+                        });
+                        if (result?.ok) {
+                            window.alert(`下载完成：${result.targetLabel}`);
+                        }
+                    } catch (error) {
+                        window.alert(error?.message || '下载项目文件失败。');
+                    }
+                });
+            });
+        }
+    });
 }
 
 function addComponentAt(type, x, y) {
@@ -1305,6 +2140,7 @@ function updateCanvasStatusBar() {
     const zoomPercent = Math.round(clampCanvasZoom(state.zoom) * 100);
     const hasClipboard = Boolean(componentClipboardPayload && componentClipboardPayload.length);
     const selectedCount = state.selectedIds.size;
+    const resizeToolActive = isResizeToolActive();
     if (refs.zoomLabel) refs.zoomLabel.textContent = `缩放 ${zoomPercent}%`;
     if (refs.zoomResetBtn) refs.zoomResetBtn.textContent = `${zoomPercent}%`;
     if (refs.selectAllBtn) refs.selectAllBtn.disabled = state.components.size === 0;
@@ -1314,6 +2150,18 @@ function updateCanvasStatusBar() {
     if (refs.duplicateBtn) refs.duplicateBtn.disabled = selectedCount === 0;
     if (refs.bringToFrontBtn) refs.bringToFrontBtn.disabled = selectedCount === 0;
     if (refs.deleteBtn) refs.deleteBtn.disabled = selectedCount === 0;
+    if (refs.resizeModeBtn) {
+        refs.resizeModeBtn.classList.toggle('active', resizeToolActive);
+        refs.resizeModeBtn.setAttribute('aria-pressed', resizeToolActive ? 'true' : 'false');
+        refs.resizeModeBtn.title = resizeToolActive
+            ? '当前已切换为组件缩放模式，拖动选中组件可直接调整尺寸。'
+            : '切换到组件缩放模式后，在画布中拖动选中组件即可调整尺寸。';
+    }
+    if (refs.toolModeLabel) {
+        refs.toolModeLabel.textContent = resizeToolActive ? '当前：组件缩放' : '当前：移动组件';
+    }
+    refs.canvasArea?.classList.toggle('resize-mode', resizeToolActive);
+    refs.stage?.classList.toggle('resize-mode', resizeToolActive);
 }
 
 function setCanvasZoom(nextZoom, options = {}) {
@@ -1362,6 +2210,8 @@ function renderStage() {
             `width:${component.width}px`,
             `height:${component.height}px`
         ].join(';');
+        const componentClassNames = getStageComponentClassNames(component.id);
+        const resizeHandles = getResizeHandleMarkup(component.id);
 
         if (component.type === 'image') {
             const imageState = getImageRenderState(component);
@@ -1377,8 +2227,9 @@ function renderStage() {
                 `;
 
             return `
-                <div class="screen-component image-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle}">
+                <div class="${componentClassNames} image-component" data-component-id="${component.id}" style="${commonStyle}">
                     ${imageHtml}
+                    ${resizeHandles}
                 </div>
             `;
         }
@@ -1386,24 +2237,28 @@ function renderStage() {
         if (component.type === 'chart') {
             const chartHtml = getChartPreviewHtml(component);
             return `
-                <div class="screen-component chart-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:12px;overflow:hidden;background:#fff;">
+                <div class="${componentClassNames} chart-component" data-component-id="${component.id}" style="${commonStyle};padding:12px;overflow:hidden;background:#fff;">
                     ${chartHtml}
+                    ${resizeHandles}
                 </div>
             `;
         }
 
         if (isAgricultureComponentType(component.type)) {
+            const previewDataAttrs = usesWorkflowSource(component.type) ? getPreviewDataAttributes(component) : '';
             return `
-                <div class="screen-component agriculture-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:14px;overflow:hidden;">
+                <div class="${componentClassNames} agriculture-component" data-component-id="${component.id}" ${previewDataAttrs} style="${commonStyle};padding:14px;overflow:hidden;">
                     ${renderAgricultureComponentMarkup(component)}
+                    ${resizeHandles}
                 </div>
             `;
         }
 
         if (isWeatherComponentType(component.type)) {
             return `
-                <div class="screen-component weather-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};padding:14px;overflow:hidden;">
+                <div class="${componentClassNames} weather-component" data-component-id="${component.id}" style="${commonStyle};padding:14px;overflow:hidden;">
                     ${renderWeatherMarkup(component)}
+                    ${resizeHandles}
                 </div>
             `;
         }
@@ -1419,11 +2274,12 @@ function renderStage() {
         ].join(';');
 
         return `
-            <div class="screen-component text-component ${isComponentSelected(component.id) ? 'selected' : ''}" data-component-id="${component.id}" style="${commonStyle};${textStyle}">
+            <div class="${componentClassNames} text-component" data-component-id="${component.id}" style="${commonStyle};${textStyle}">
                 <div class="text-component-content">
                     <div class="text-main-content">${escapeHtml(textState.text)}</div>
                     ${textState.note ? `<div class="text-source-note">${escapeHtml(textState.note)}</div>` : ''}
                 </div>
+                ${resizeHandles}
             </div>
         `;
     }).join('');
@@ -1798,6 +2654,40 @@ function renderSensorSettings(component) {
     `;
 }
 
+function renderAgriInsightSettings(component) {
+    const source = normalizeSource(component.props.source);
+    const state = getStructuredAgriRenderState(component);
+    const hints = {
+        'agri-model': '推荐绑定 abstract_data_model 节点输出，组件会自动读取 screen_contract.overview 与维度条形数据。',
+        'agri-climate': '可绑定 abstract_data_model、forecast 或 climate 类字符串端口，组件会自动寻找气候预测字段。',
+        'agri-yield': '可绑定 abstract_data_model、yield 或产量预测类字符串端口，组件会自动寻找 yield_index 与 factor_bars。',
+        'agri-decision': '可绑定 abstract_data_model、decision 或辅助决策类字符串端口，组件会自动寻找 top_decision 与 modules 列表。'
+    };
+
+    return `
+        <section class="prop-section">
+            <h3>组件内容</h3>
+            <div>
+                <label class="prop-label" for="agriInsightTitleInput">标题</label>
+                <input class="prop-input" id="agriInsightTitleInput" type="text" value="${escapeHtml(component.props.title || '')}">
+            </div>
+            ${source.mode === SOURCE_MODE_MANUAL ? `
+                <div>
+                    <label class="prop-label" for="agriInsightJsonInput">手动 JSON</label>
+                    <textarea class="prop-textarea" id="agriInsightJsonInput" spellcheck="false">${escapeHtml(component.props.jsonText || '')}</textarea>
+                </div>
+            ` : `
+                <div>
+                    <label class="prop-label">当前绑定</label>
+                    <div class="source-preview-box">${escapeHtml(state.sourceNote || '工作流端口')}</div>
+                </div>
+            `}
+            <p class="prop-hint">${escapeHtml(hints[component.type] || '该组件会自动解析农业模型 JSON。')}</p>
+            ${state.error ? `<div class="chart-error">${escapeHtml(state.error)}</div>` : ''}
+        </section>
+    `;
+}
+
 function renderComponentDataSection(component) {
     if (usesWorkflowSource(component.type)) return renderSourceSection(component);
     if (isAgricultureComponentType(component.type)) return renderAgricultureDataSourceSection(component);
@@ -1810,6 +2700,7 @@ function renderComponentSettingsSection(component) {
     if (component.type === 'image') return renderImageSettings(component);
     if (component.type === 'chart') return renderChartSettings(component);
     if (component.type === 'agri-sensor') return renderSensorSettings(component);
+    if (isAgriInsightComponentType(component.type)) return renderAgriInsightSettings(component);
     if (component.type === 'weather') return renderWeatherSettings(component);
     return '';
 }
@@ -1886,7 +2777,7 @@ function renderProperties() {
             </section>
             <section class="prop-section">
                 <h3>使用方式</h3>
-                <p class="prop-hint">从左侧拖拽组件到画布中。支持 Ctrl+点击多选组件，也支持在空白区域按住左键拖动进行框选；多选时右侧会显示所有选中组件的属性。除了文本、图片和图表外，还支持智慧农业专用的系统数据卡、环境监测卡和通讯状态卡。</p>
+                <p class="prop-hint">从左侧拖拽组件到画布中。支持 Ctrl+点击多选组件，也支持在空白区域按住左键拖动进行框选；多选时右侧会显示所有选中组件的属性。单选组件后可直接拖动四角控制点缩放，也可以通过顶部“组件缩放”按钮切换缩放模式后在画布中拖动调整尺寸。除了文本、图片和图表外，还支持智慧农业专用的传感器、环境抽象模型、气候预测、产量预测和辅助决策组件。</p>
             </section>
         `;
         bindPagePropertyInputs();
@@ -2150,6 +3041,97 @@ function bindComponentPropertyInputs(component, multiComponents = []) {
         return;
     }
 
+    if (isAgriInsightComponentType(component.type)) {
+        const titleInput = document.getElementById('agriInsightTitleInput');
+        const jsonInput = document.getElementById('agriInsightJsonInput');
+
+        if (titleInput) {
+            titleInput.addEventListener('input', () => {
+                component.props.title = titleInput.value;
+                renderStage();
+            });
+        }
+
+        if (jsonInput) {
+            jsonInput.addEventListener('input', () => {
+                component.props.jsonText = jsonInput.value;
+                renderAll();
+            });
+        }
+        return;
+    }
+
+    if (component.type === 'agri-sensor') {
+        const titleInput = document.getElementById('sensorTitleInput');
+        const dataModeInput = document.getElementById('agriDataModeInput');
+        const apiPathInput = document.getElementById('agriApiPathInput');
+        const refreshInput = document.getElementById('agriRefreshIntervalInput');
+        const addSensorBtn = document.getElementById('addSensorBtn');
+
+        if (titleInput) {
+            titleInput.addEventListener('input', () => {
+                component.props.title = titleInput.value;
+                renderStage();
+            });
+        }
+        if (dataModeInput) {
+            dataModeInput.addEventListener('change', () => {
+                component.props.dataMode = dataModeInput.value === AGRI_DATA_MODE_API ? AGRI_DATA_MODE_API : SOURCE_MODE_MANUAL;
+                renderStage();
+            });
+        }
+        if (apiPathInput) {
+            apiPathInput.addEventListener('input', () => {
+                component.props.apiPath = apiPathInput.value;
+            });
+        }
+        if (refreshInput) {
+            refreshInput.addEventListener('input', () => {
+                component.props.refreshInterval = clamp(Number(refreshInput.value) || 30, 5, 3600);
+            });
+        }
+
+        document.querySelectorAll('#sensorListContainer .sensor-item').forEach((row, index) => {
+            const sensor = Array.isArray(component.props.sensors) ? component.props.sensors[index] : null;
+            if (!sensor) return;
+
+            row.querySelector('.sensor-name')?.addEventListener('input', (event) => {
+                sensor.name = event.target.value;
+                renderStage();
+            });
+            row.querySelector('.sensor-value')?.addEventListener('input', (event) => {
+                sensor.value = event.target.value;
+                renderStage();
+            });
+            row.querySelector('.sensor-unit')?.addEventListener('input', (event) => {
+                sensor.unit = event.target.value;
+                renderStage();
+            });
+            row.querySelector('.sensor-status')?.addEventListener('change', (event) => {
+                sensor.status = event.target.value;
+                renderStage();
+            });
+            row.querySelector('.remove-sensor-btn')?.addEventListener('click', () => {
+                component.props.sensors.splice(index, 1);
+                renderAll();
+            });
+        });
+
+        if (addSensorBtn) {
+            addSensorBtn.addEventListener('click', () => {
+                if (!Array.isArray(component.props.sensors)) component.props.sensors = [];
+                component.props.sensors.push({
+                    name: '新传感器',
+                    value: '--',
+                    unit: '',
+                    status: '正常'
+                });
+                renderAll();
+            });
+        }
+        return;
+    }
+
     if (component.type === 'weather') {
         const bindWeatherText = (id, prop) => {
             const element = document.getElementById(id);
@@ -2327,6 +3309,100 @@ function constrainComponentToStage(component) {
     component.y = clamp(component.y, 0, Math.max(0, state.page.height - component.height));
 }
 
+function beginMoveDrag(selectedComponents, point) {
+    if (!selectedComponents.length) return;
+    const rightMost = Math.max(...selectedComponents.map(item => item.x + item.width));
+    const bottomMost = Math.max(...selectedComponents.map(item => item.y + item.height));
+    dragState = {
+        interaction: 'move',
+        ids: selectedComponents.map(item => item.id),
+        startX: point.x,
+        startY: point.y,
+        originalById: new Map(selectedComponents.map(item => [item.id, { x: item.x, y: item.y }])),
+        minX: Math.min(...selectedComponents.map(item => item.x)),
+        minY: Math.min(...selectedComponents.map(item => item.y)),
+        maxX: rightMost,
+        maxY: bottomMost
+    };
+}
+
+function beginResizeDrag(component, point, handle = '') {
+    if (!component) return;
+    dragState = {
+        interaction: handle ? 'resize-handle' : 'resize-tool',
+        componentId: component.id,
+        handle,
+        startX: point.x,
+        startY: point.y,
+        original: {
+            x: component.x,
+            y: component.y,
+            width: component.width,
+            height: component.height
+        }
+    };
+}
+
+function applyMoveDrag(point) {
+    if (!dragState || dragState.interaction !== 'move') return;
+
+    const deltaX = clamp(point.x - dragState.startX, -dragState.minX, state.page.width - dragState.maxX);
+    const deltaY = clamp(point.y - dragState.startY, -dragState.minY, state.page.height - dragState.maxY);
+
+    dragState.ids.forEach(id => {
+        const component = state.components.get(id);
+        const original = dragState.originalById.get(id);
+        if (!component || !original) return;
+        component.x = original.x + deltaX;
+        component.y = original.y + deltaY;
+        constrainComponentToStage(component);
+    });
+}
+
+function applyHandleResize(component, point) {
+    if (!dragState || dragState.interaction !== 'resize-handle' || !component) return;
+
+    const minimumSize = 40;
+    const original = dragState.original;
+    const originalRight = original.x + original.width;
+    const originalBottom = original.y + original.height;
+
+    let left = original.x;
+    let right = originalRight;
+    let top = original.y;
+    let bottom = originalBottom;
+
+    if (dragState.handle.includes('w')) {
+        left = clamp(point.x, 0, originalRight - minimumSize);
+    }
+    if (dragState.handle.includes('e')) {
+        right = clamp(point.x, original.x + minimumSize, state.page.width);
+    }
+    if (dragState.handle.includes('n')) {
+        top = clamp(point.y, 0, originalBottom - minimumSize);
+    }
+    if (dragState.handle.includes('s')) {
+        bottom = clamp(point.y, original.y + minimumSize, state.page.height);
+    }
+
+    component.x = left;
+    component.y = top;
+    component.width = right - left;
+    component.height = bottom - top;
+    constrainComponentToStage(component);
+}
+
+function applyResizeToolDrag(component, point) {
+    if (!dragState || dragState.interaction !== 'resize-tool' || !component) return;
+
+    const original = dragState.original;
+    component.width = clamp(original.width + (point.x - dragState.startX), 40, state.page.width - original.x);
+    component.height = clamp(original.height + (point.y - dragState.startY), 40, state.page.height - original.y);
+    component.x = original.x;
+    component.y = original.y;
+    constrainComponentToStage(component);
+}
+
 function renderAll() {
     renderStage();
     renderProperties();
@@ -2442,6 +3518,9 @@ function bindCanvasStatusBar() {
     if (refs.duplicateBtn) {
         refs.duplicateBtn.addEventListener('click', duplicateSelectedComponents);
     }
+    if (refs.resizeModeBtn) {
+        refs.resizeModeBtn.addEventListener('click', toggleResizeCanvasTool);
+    }
     if (refs.bringToFrontBtn) {
         refs.bringToFrontBtn.addEventListener('click', bringSelectedComponentsToFront);
     }
@@ -2512,8 +3591,14 @@ function bindStageInteractions() {
     refs.stage.addEventListener('mousedown', (event) => {
         const isToggleSelection = event.ctrlKey || event.metaKey;
         const componentEl = event.target.closest('[data-component-id]');
+        const resizeHandleEl = event.target.closest('[data-resize-handle]');
         if (!componentEl) {
             if (event.button === 0) {
+                if (isResizeToolActive() && hasSingleSelection()) {
+                    beginResizeDrag(getSelectedComponent(), getPointInStage(event.clientX, event.clientY));
+                    event.preventDefault();
+                    return;
+                }
                 if (beginBoxSelection(event)) {
                     event.preventDefault();
                 }
@@ -2526,9 +3611,26 @@ function bindStageInteractions() {
         if (!component) return;
 
         if (event.button !== 0) return;
+
+        if (resizeHandleEl) {
+            setSelectedComponents([componentId], componentId);
+            renderAll();
+            beginResizeDrag(component, getPointInStage(event.clientX, event.clientY), String(resizeHandleEl.getAttribute('data-resize-handle') || ''));
+            event.preventDefault();
+            return;
+        }
+
         if (isToggleSelection) {
             toggleComponentSelection(componentId);
             renderAll();
+            event.preventDefault();
+            return;
+        }
+
+        if (isResizeToolActive()) {
+            setSelectedComponents([componentId], componentId);
+            renderAll();
+            beginResizeDrag(component, getPointInStage(event.clientX, event.clientY));
             event.preventDefault();
             return;
         }
@@ -2547,18 +3649,7 @@ function bindStageInteractions() {
         const selectedComponents = selectedIds
             .map(id => state.components.get(id))
             .filter(Boolean);
-        const rightMost = Math.max(...selectedComponents.map(item => item.x + item.width));
-        const bottomMost = Math.max(...selectedComponents.map(item => item.y + item.height));
-        dragState = {
-            ids: selectedIds,
-            startX: point.x,
-            startY: point.y,
-            originalById: new Map(selectedComponents.map(item => [item.id, { x: item.x, y: item.y }])),
-            minX: Math.min(...selectedComponents.map(item => item.x)),
-            minY: Math.min(...selectedComponents.map(item => item.y)),
-            maxX: rightMost,
-            maxY: bottomMost
-        };
+        beginMoveDrag(selectedComponents, point);
 
         event.preventDefault();
     });
@@ -2581,17 +3672,16 @@ function bindStageInteractions() {
         if (!dragState) return;
 
         const point = getPointInStage(event.clientX, event.clientY);
-        const deltaX = clamp(point.x - dragState.startX, -dragState.minX, state.page.width - dragState.maxX);
-        const deltaY = clamp(point.y - dragState.startY, -dragState.minY, state.page.height - dragState.maxY);
-
-        dragState.ids.forEach(id => {
-            const component = state.components.get(id);
-            const original = dragState.originalById.get(id);
-            if (!component || !original) return;
-            component.x = original.x + deltaX;
-            component.y = original.y + deltaY;
-            constrainComponentToStage(component);
-        });
+        if (dragState.interaction === 'move') {
+            applyMoveDrag(point);
+        } else {
+            const component = state.components.get(dragState.componentId);
+            if (dragState.interaction === 'resize-handle') {
+                applyHandleResize(component, point);
+            } else if (dragState.interaction === 'resize-tool') {
+                applyResizeToolDrag(component, point);
+            }
+        }
         renderStage();
     });
 
@@ -2698,8 +3788,9 @@ function buildPreviewHtml() {
         }
 
         if (isAgricultureComponentType(component.type)) {
+            const previewDataAttrs = usesWorkflowSource(component.type) ? getPreviewDataAttributes(component) : '';
             return `
-                <div style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;padding:14px;">
+                <div ${previewDataAttrs} style="position:absolute;left:${component.x}px;top:${component.y}px;width:${component.width}px;height:${component.height}px;overflow:hidden;padding:14px;">
                     ${renderAgricultureComponentMarkup(component, true)}
                 </div>
             `;
@@ -2877,6 +3968,79 @@ function buildPreviewHtml() {
             font-size: 11px;
             line-height: 1.5;
         }
+        .agri-model-summary,
+        .agri-climate-summary,
+        .agri-yield-narrative {
+            color: rgba(234, 248, 252, 0.88);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .agri-kpi-value.agri-kpi-small { font-size: 16px; }
+        .agri-kpi-meta { color: rgba(201, 233, 240, 0.82); font-size: 11px; }
+        .agri-kpi-grid.agri-kpi-grid-three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .agri-bar-list { display: grid; gap: 8px; }
+        .agri-bar-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 8px 10px;
+            border-radius: 14px;
+            background: rgba(230, 249, 242, 0.06);
+            border: 1px solid rgba(194, 236, 229, 0.08);
+        }
+        .agri-bar-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 11px;
+            color: rgba(229, 246, 249, 0.88);
+        }
+        .agri-bar-head strong { font-size: 12px; color: #ffffff; }
+        .agri-bar-track {
+            width: 100%;
+            height: 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.10);
+            overflow: hidden;
+        }
+        .agri-bar-track span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #34d399 0%, #38bdf8 100%);
+        }
+        .agri-bar-meta { color: rgba(194, 236, 229, 0.78); font-size: 10px; }
+        .agri-decision-top {
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(230, 249, 242, 0.08);
+            border: 1px solid rgba(194, 236, 229, 0.10);
+        }
+        .agri-decision-top-label { color: rgba(194, 236, 229, 0.82); font-size: 11px; margin-bottom: 6px; }
+        .agri-decision-top-action { font-size: 22px; font-weight: 800; line-height: 1.2; color: #ffffff; }
+        .agri-decision-top-reason { margin-top: 8px; color: rgba(229, 246, 249, 0.86); font-size: 12px; line-height: 1.6; }
+        .agri-decision-list { display: grid; gap: 8px; }
+        .agri-decision-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(230, 249, 242, 0.06);
+            border: 1px solid rgba(194, 236, 229, 0.08);
+        }
+        .agri-decision-item-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 11px;
+            color: rgba(201, 233, 240, 0.82);
+        }
+        .agri-decision-item-head strong { color: #ffffff; font-size: 11px; }
+        .agri-decision-item-action { font-size: 15px; font-weight: 700; color: #ffffff; }
+        .agri-decision-item-reason { color: rgba(229, 246, 249, 0.80); font-size: 11px; line-height: 1.5; }
         .agri-status-pill {
             padding: 7px 12px;
             border-radius: 999px;
@@ -3137,6 +4301,7 @@ async function importFromFile(file) {
     const text = await file.text();
     const data = JSON.parse(text);
     loadScreenData(data);
+    setCurrentScreenProject(null);
     renderAll();
 }
 function loadImportedProjectFromSession() {
@@ -3152,6 +4317,7 @@ function loadImportedProjectFromSession() {
             return false;
         }
         loadScreenData(data);
+        setCurrentScreenProject(null);
         return true;
     } catch (error) {
         return false;
@@ -3204,6 +4370,7 @@ function initializeProject() {
         if (project?.type === 'screen' && Array.isArray(project.data?.components)) {
             touchProject(project.id);
             loadScreenData(project.data);
+            setCurrentScreenProject(getProjectById(project.id) || project);
             return;
         }
     }
@@ -3213,13 +4380,39 @@ function initializeProject() {
         state.nextId = 1;
         state.page = { ...DEFAULT_PAGE };
         clearSelectedComponents();
+        setCurrentScreenProject(null);
         return;
     }
 
     seedDemoProject();
+    setCurrentScreenProject(null);
 }
 
 function bindTopbarActions() {
+    refs.openLocalBtn?.addEventListener('click', () => {
+        openLocalScreenProjectPicker().catch((error) => {
+            window.alert(error?.message || '打开本地项目失败。');
+        });
+    });
+
+    refs.saveLocalBtn?.addEventListener('click', () => {
+        saveScreenProjectLocally().catch((error) => {
+            window.alert(error?.message || '保存本地项目失败。');
+        });
+    });
+
+    refs.saveCloudBtn?.addEventListener('click', () => {
+        saveScreenProjectToCloud().catch((error) => {
+            window.alert(error?.message || '保存到数据库失败。');
+        });
+    });
+
+    refs.downloadCloudBtn?.addEventListener('click', () => {
+        downloadScreenProjectFromCloud().catch((error) => {
+            window.alert(error?.message || '从数据库下载失败。');
+        });
+    });
+
     refs.importBtn.addEventListener('click', () => {
         refs.importInput.click();
     });
@@ -3242,6 +4435,14 @@ function bindTopbarActions() {
     });
 
     refs.runBtn.addEventListener('click', runPreview);
+
+    attachAuthControls(refs.accountControls, {
+        anonymousLabel: '未登录',
+        loginText: '登录',
+        logoutText: '退出',
+        buttonVariant: 'secondary',
+        formatUserLabel: (user) => `当前用户：${user.display_name || user.username}`
+    });
 }
 
 function bindExternalRefresh() {
@@ -3258,6 +4459,7 @@ function bindExternalRefresh() {
 function init() {
     renderLibrary();
     initializeProject();
+    updateScreenProjectBadge();
     bindLibraryDragAndDrop();
     bindCanvasStatusBar();
     bindStageInteractions();

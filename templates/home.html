@@ -5,11 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>低代码开发平台</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='sharedUi.css') }}">
 </head>
 <body>
 <main class="landing-shell">
     <section class="landing-card home-action-panel">
-        <div class="panel-badge">Low-Code Studio</div>
+        <div class="home-panel-topbar">
+            <div class="panel-badge">Low-Code Studio</div>
+            <div class="shared-auth-controls" id="homeAccountControls"></div>
+        </div>
         <h1>低代码开发平台</h1>
         <p class="panel-lead">点击左侧入口后弹出项目操作窗口，可选择创建、打开或导入对应项目。</p>
 
