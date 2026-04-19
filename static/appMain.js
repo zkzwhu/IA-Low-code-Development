@@ -567,6 +567,20 @@ async function runWorkflow() {
     }
 }
 
+async function readDebugJson(resp) {
+    const text = await resp.text();
+    if (!text.trim()) return {};
+
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        if (text.trim().startsWith('<')) {
+            throw new Error('后端返回了 HTML 错误页，请检查 Flask 控制台日志。');
+        }
+        throw new Error(text.slice(0, 200));
+    }
+}
+
 async function debugStart() {
     setConsoleTab('debug');
     clearConsole('debug');
@@ -577,7 +591,7 @@ async function debugStart() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(buildWorkflowPayload())
         });
-        const result = await resp.json();
+        const result = await readDebugJson(resp);
 
         if (!resp.ok) {
             addConsoleLog(`进入调试失败：${result.error || resp.status}`, 'error', 'debug');
@@ -602,7 +616,7 @@ async function runDebugAction(endpoint, failLabel, snapshotTitle) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ session_id: debugSessionId })
         });
-        const result = await resp.json();
+        const result = await readDebugJson(resp);
 
         if (!resp.ok) {
             addConsoleLog(`${failLabel}：${result.error || resp.status}`, 'error', 'debug');

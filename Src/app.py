@@ -1050,54 +1050,69 @@ def execute_workflow():
 
 @app.route('/api/debug/start', methods=['POST'])
 def debug_start():
-    data = request.get_json() or {}
     try:
+        data = request.get_json() or {}
         session = create_session(data)
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        app.logger.exception('debug_start failed')
+        return jsonify({'error': f'进入调试失败: {exc}'}), 500
 
-    session_id = os.urandom(12).hex()
-    debug_sessions[session_id] = session
-    return jsonify({'session_id': session_id, 'state': serialize_state(session)})
+    try:
+        session_id = os.urandom(12).hex()
+        debug_sessions[session_id] = session
+        return jsonify({'session_id': session_id, 'state': serialize_state(session)})
+    except Exception as exc:
+        app.logger.exception('debug_start serialize failed')
+        return jsonify({'error': f'进入调试失败: {exc}'}), 500
 
 
 @app.route('/api/debug/step', methods=['POST'])
 def debug_step():
-    data = request.get_json() or {}
-    session_id = data.get('session_id')
-    session = debug_sessions.get(session_id)
-    if not session:
-        return jsonify({'error': 'invalid session'}), 400
-    logs, finished = step_once(session)
-    return jsonify({'logs': logs, 'finished': finished, 'state': serialize_state(session)})
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        session = debug_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'invalid session'}), 400
+        logs, finished = step_once(session)
+        return jsonify({'logs': logs, 'finished': finished, 'state': serialize_state(session)})
+    except Exception as exc:
+        app.logger.exception('debug_step failed')
+        return jsonify({'error': f'单步执行失败: {exc}'}), 500
 
 
 @app.route('/api/debug/continue', methods=['POST'])
 def debug_continue():
-    data = request.get_json() or {}
-    session_id = data.get('session_id')
-    session = debug_sessions.get(session_id)
-    if not session:
-        return jsonify({'error': 'invalid session'}), 400
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        session = debug_sessions.get(session_id)
+        if not session:
+            return jsonify({'error': 'invalid session'}), 400
 
-    logs_all: list[str] = []
-    first = True
-    for _ in range(500):
-        current_id = session.get('current_id')
-        if current_id is None:
-            break
-        node = session['nodes_map'].get(current_id) or {}
-        breakpoint_on = (node.get('properties') or {}).get('breakpoint') is True
-        if breakpoint_on and not first:
-            logs_all.append(f'命中断点: {current_id}')
-            break
-        first = False
-        logs, finished = step_once(session)
-        logs_all.extend(logs)
-        if finished:
-            break
+        logs_all: list[str] = []
+        first = True
+        for _ in range(500):
+            current_id = session.get('current_id')
+            if current_id is None:
+                break
+            node = session['nodes_map'].get(current_id) or {}
+            breakpoint_on = (node.get('properties') or {}).get('breakpoint') is True
+            if breakpoint_on and not first:
+                logs_all.append(f'命中断点: {current_id}')
+                break
+            first = False
+            logs, finished = step_once(session)
+            logs_all.extend(logs)
+            if finished:
+                break
 
-    return jsonify({'logs': logs_all, 'finished': session.get('current_id') is None, 'state': serialize_state(session)})
+        return jsonify({'logs': logs_all, 'finished': session.get('current_id') is None, 'state': serialize_state(session)})
+    except Exception as exc:
+        app.logger.exception('debug_continue failed')
+        return jsonify({'error': f'继续执行失败: {exc}'}), 500
 
 
 @app.route('/api/debug/stop', methods=['POST'])
