@@ -2,7 +2,7 @@ const STORAGE_KEY = 'ia.lowcode.projects.v1';
 const MAX_RECENT_PROJECTS = 24;
 const DEMO_WORKFLOW_PROJECT_ID = 'workflow-demo-smart-agriculture';
 const DEMO_SCREEN_PROJECT_ID = 'screen-demo-smart-agriculture';
-const DEMO_VERSION = 3;
+const DEMO_VERSION = 4;
 
 export const DEMO_PROJECT_IDS = Object.freeze({
     workflow: DEMO_WORKFLOW_PROJECT_ID,
@@ -1134,6 +1134,25 @@ function buildDemoRiskDistributionCsv() {
     ].join('\n');
 }
 
+function buildDemoDecisionPriorityCsv() {
+    return [
+        'action,score',
+        '择时补水,81.2',
+        '低频通风,54.6',
+        '继续巡检,42.8'
+    ].join('\n');
+}
+
+function buildDemoYieldFactorCsv() {
+    return [
+        'factor,score',
+        '热环境适配,78.2',
+        '空气湿度适配,74.1',
+        '土壤供水能力,81.6',
+        '光照活跃度,72.5'
+    ].join('\n');
+}
+
 function buildDemoOverviewSummaryPayload() {
     return {
         device_name: 'SmartAgriculture_thermometer',
@@ -1988,6 +2007,31 @@ function buildDemoScreenProject() {
         }
     });
 
+    const createChartComponent = (id, x, y, width, height, title, chartType, csvText, source, overrides = {}) => ({
+        id,
+        type: 'chart',
+        x,
+        y,
+        width,
+        height,
+        props: {
+            title,
+            chartType,
+            csvText,
+            labelColumn: '',
+            valueColumn: '',
+            valueColumns: [],
+            seriesColumn: '',
+            seriesMode: chartType === 'pie' ? 'single' : 'multi',
+            selectedSeriesKeys: [],
+            dataLayout: 'wide',
+            enableAggregation: false,
+            aggregationLimit: 60,
+            source,
+            ...overrides
+        }
+    });
+
     return {
         id: DEMO_SCREEN_PROJECT_ID,
         type: 'screen',
@@ -1995,17 +2039,18 @@ function buildDemoScreenProject() {
         data: {
             demoVersion: DEMO_VERSION,
             page: {
-                width: 1600,
-                height: 1960,
+                width: 1680,
+                height: 2348,
                 background: 'radial-gradient(circle at 18% 18%, rgba(59, 130, 246, 0.18), transparent 24%), radial-gradient(circle at 82% 12%, rgba(16, 185, 129, 0.20), transparent 26%), linear-gradient(145deg, #09131c 0%, #102436 42%, #153b34 100%)'
             },
-            components: [
+            components: (() => {
+                const components = [
                 {
                     id: 1,
                     type: 'text',
-                    x: 52,
+                    x: 56,
                     y: 38,
-                    width: 980,
+                    width: 1110,
                     height: 76,
                     props: {
                         text: '智慧农业低代码全功能演示工程',
@@ -2022,7 +2067,7 @@ function buildDemoScreenProject() {
                     type: 'text',
                     x: 56,
                     y: 116,
-                    width: 1010,
+                    width: 1110,
                     height: 104,
                     props: {
                         text: '同一张大屏内同时展示工作流摘要解析、农业建模结果、图表组件、图片抓拍、实时天气和传感器卡，完整体现系统的通用能力与农业场景特殊性。',
@@ -2037,10 +2082,10 @@ function buildDemoScreenProject() {
                 {
                     id: 3,
                     type: 'text',
-                    x: 1218,
+                    x: 1250,
                     y: 46,
-                    width: 180,
-                    height: 62,
+                    width: 374,
+                    height: 44,
                     props: {
                         text: '核心能力',
                         fontSize: 18,
@@ -2054,10 +2099,10 @@ function buildDemoScreenProject() {
                 {
                     id: 4,
                     type: 'text',
-                    x: 1218,
-                    y: 110,
-                    width: 180,
-                    height: 110,
+                    x: 1250,
+                    y: 100,
+                    width: 374,
+                    height: 120,
                     props: {
                         text: '16',
                         fontSize: 56,
@@ -2073,8 +2118,8 @@ function buildDemoScreenProject() {
                     type: 'text',
                     x: 56,
                     y: 244,
-                    width: 1488,
-                    height: 112,
+                    width: 1568,
+                    height: 118,
                     props: {
                         text: buildDemoNarrativeText(),
                         fontSize: 17,
@@ -2089,9 +2134,9 @@ function buildDemoScreenProject() {
                     id: 6,
                     type: 'agri-sensor',
                     x: 56,
-                    y: 384,
-                    width: 300,
-                    height: 286,
+                    y: 390,
+                    width: 374,
+                    height: 300,
                     props: {
                         title: '实时传感器总览',
                         dataMode: 'api',
@@ -2108,10 +2153,10 @@ function buildDemoScreenProject() {
                 {
                     id: 7,
                     type: 'image',
-                    x: 376,
-                    y: 384,
-                    width: 344,
-                    height: 286,
+                    x: 454,
+                    y: 390,
+                    width: 374,
+                    height: 300,
                     props: {
                         src: buildDemoCameraSnapshotUrl(),
                         alt: '农业现场抓拍',
@@ -2125,10 +2170,10 @@ function buildDemoScreenProject() {
                 {
                     id: 8,
                     type: 'weather',
-                    x: 740,
-                    y: 384,
-                    width: 340,
-                    height: 286,
+                    x: 852,
+                    y: 390,
+                    width: 374,
+                    height: 300,
                     props: {
                         title: '现场天气',
                         subtitle: '武汉示范温室',
@@ -2147,17 +2192,17 @@ function buildDemoScreenProject() {
                 {
                     id: 9,
                     type: 'chart',
-                    x: 1100,
-                    y: 384,
-                    width: 444,
-                    height: 286,
+                    x: 1250,
+                    y: 390,
+                    width: 374,
+                    height: 300,
                     props: {
                         title: '风险等级分布',
                         chartType: 'pie',
                         csvText: buildDemoRiskDistributionCsv(),
-                        labelColumn: '',
-                        valueColumn: '',
-                        valueColumns: [],
+                        labelColumn: 'level',
+                        valueColumn: 'count',
+                        valueColumns: ['count'],
                         seriesColumn: '',
                         seriesMode: 'single',
                         selectedSeriesKeys: [],
@@ -2171,41 +2216,41 @@ function buildDemoScreenProject() {
                     id: 10,
                     type: 'chart',
                     x: 56,
-                    y: 700,
-                    width: 460,
+                    y: 714,
+                    width: 374,
                     height: 320,
                     props: {
-                        title: '最新环境指标',
-                        chartType: 'bar',
-                        csvText: buildDemoLatestSensorCsv(),
-                        labelColumn: '',
-                        valueColumn: '',
-                        valueColumns: [],
+                        title: '温湿协同趋势',
+                        chartType: 'line',
+                        csvText: buildDemoHistoryTrendCsv(),
+                        labelColumn: 'bucket',
+                        valueColumn: 'temperature',
+                        valueColumns: ['temperature', 'humidity'],
                         seriesColumn: '',
-                        seriesMode: 'multi',
+                        seriesMode: 'double',
                         selectedSeriesKeys: [],
                         dataLayout: 'wide',
                         enableAggregation: false,
                         aggregationLimit: 60,
-                        source: portSource('demo-port-sensor-csv')
+                        source: portSource('demo-port-trend-csv')
                     }
                 },
                 {
                     id: 11,
                     type: 'chart',
-                    x: 536,
-                    y: 700,
-                    width: 500,
+                    x: 454,
+                    y: 714,
+                    width: 374,
                     height: 320,
                     props: {
-                        title: '48 小时趋势时序',
+                        title: '土壤湿度趋势',
                         chartType: 'line',
                         csvText: buildDemoHistoryTrendCsv(),
-                        labelColumn: '',
-                        valueColumn: '',
-                        valueColumns: [],
+                        labelColumn: 'bucket',
+                        valueColumn: 'soil_humidity',
+                        valueColumns: ['soil_humidity'],
                         seriesColumn: '',
-                        seriesMode: 'multi',
+                        seriesMode: 'single',
                         selectedSeriesKeys: [],
                         dataLayout: 'wide',
                         enableAggregation: false,
@@ -2216,22 +2261,56 @@ function buildDemoScreenProject() {
                 {
                     id: 12,
                     type: 'agri-model',
-                    x: 1056,
-                    y: 700,
-                    width: 488,
-                    height: 320,
+                    x: 56,
+                    y: 1048,
+                    width: 506,
+                    height: 260,
                     props: {
                         title: '农业环境抽象模型',
                         jsonText: buildDemoModelDefaultValue(),
                         source: portSource('demo-port-model')
                     }
                 },
+                createChartComponent(
+                    23,
+                    852,
+                    714,
+                    374,
+                    320,
+                    '光照活跃度趋势',
+                    'line',
+                    buildDemoHistoryTrendCsv(),
+                    portSource('demo-port-trend-csv'),
+                    {
+                        labelColumn: 'bucket',
+                        valueColumn: 'light_lux',
+                        valueColumns: ['light_lux'],
+                        seriesMode: 'single'
+                    }
+                ),
+                createChartComponent(
+                    24,
+                    1250,
+                    714,
+                    374,
+                    320,
+                    '辅助决策优先级',
+                    'bar',
+                    buildDemoDecisionPriorityCsv(),
+                    manualSource(),
+                    {
+                        labelColumn: 'action',
+                        valueColumn: 'score',
+                        valueColumns: ['score'],
+                        seriesMode: 'single'
+                    }
+                ),
                 {
                     id: 13,
                     type: 'agri-climate',
-                    x: 56,
-                    y: 1044,
-                    width: 480,
+                    x: 586,
+                    y: 1048,
+                    width: 506,
                     height: 260,
                     props: {
                         title: '气候趋势预测',
@@ -2242,23 +2321,40 @@ function buildDemoScreenProject() {
                 {
                     id: 14,
                     type: 'agri-yield',
-                    x: 556,
-                    y: 1044,
-                    width: 420,
-                    height: 260,
+                    x: 56,
+                    y: 1952,
+                    width: 772,
+                    height: 286,
                     props: {
                         title: '产量预测',
                         jsonText: buildDemoModelDefaultValue(),
                         source: portSource('demo-port-model')
                     }
                 },
+                createChartComponent(
+                    25,
+                    1116,
+                    1048,
+                    508,
+                    260,
+                    '产量影响因子',
+                    'bar',
+                    buildDemoYieldFactorCsv(),
+                    manualSource(),
+                    {
+                        labelColumn: 'factor',
+                        valueColumn: 'score',
+                        valueColumns: ['score'],
+                        seriesMode: 'single'
+                    }
+                ),
                 {
                     id: 15,
                     type: 'agri-decision',
-                    x: 996,
-                    y: 1044,
-                    width: 548,
-                    height: 260,
+                    x: 852,
+                    y: 1952,
+                    width: 772,
+                    height: 286,
                     props: {
                         title: '辅助决策',
                         jsonText: buildDemoModelDefaultValue(),
@@ -2272,8 +2368,24 @@ function buildDemoScreenProject() {
                 createSummaryComponent(20, 56, 1636, 476, 280, '气候预测摘要卡', 'demo-port-forecast-summary', buildDemoForecastSummaryPayload()),
                 createSummaryComponent(21, 548, 1636, 476, 280, '产量预测摘要卡', 'demo-port-yield-summary', buildDemoYieldSummaryPayload()),
                 createSummaryComponent(22, 1040, 1636, 504, 280, '决策摘要卡', 'demo-port-decision-summary', buildDemoDecisionSummaryPayload())
-            ],
-            next_id: 23
+                ];
+                const layoutOverrides = {
+                    16: { x: 56, y: 1332, width: 374, height: 280 },
+                    17: { x: 454, y: 1332, width: 374, height: 280 },
+                    18: { x: 852, y: 1332, width: 374, height: 280 },
+                    19: { x: 1250, y: 1332, width: 374, height: 280 },
+                    20: { x: 56, y: 1636, width: 506, height: 280 },
+                    21: { x: 586, y: 1636, width: 506, height: 280 },
+                    22: { x: 1116, y: 1636, width: 508, height: 280 }
+                };
+
+                return components.map(component => (
+                    layoutOverrides[component.id]
+                        ? { ...component, ...layoutOverrides[component.id] }
+                        : component
+                ));
+            })(),
+            next_id: 26
         }
     };
 }

@@ -26,6 +26,10 @@ from analytics.advanced_predict_decision import (
 from debug_runtime import create_session, serialize_state, step_once
 from database import SensorDatabase
 from start_mqtt_listener import start_mqtt_listener
+from workflow_prediction_service import (
+    attach_prediction_file_urls,
+    run_workflow_prediction,
+)
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -382,23 +386,8 @@ def get_advanced_prediction_request_args() -> dict[str, Any]:
     }
 
 
-def build_generated_file_url(relative_file: str) -> str:
-    relative_path = str(relative_file or '').replace('\\', '/').lstrip('/')
-    quoted = urllib.parse.quote(relative_path, safe='/')
-    return f'/api/agriculture/analytics/generated/{quoted}'
-
-
 def attach_advanced_prediction_file_urls(payload: dict[str, Any]) -> dict[str, Any]:
-    relative_files = payload.get('relative_files')
-    if not isinstance(relative_files, dict):
-        return payload
-
-    payload['file_urls'] = {
-        key: build_generated_file_url(value)
-        for key, value in relative_files.items()
-        if value and ':' not in str(value)
-    }
-    return payload
+    return attach_prediction_file_urls(payload)
 
 
 def run_analysis_task(analysis_type: str, device_id: str, hours: int, limit: int) -> Any:
@@ -642,7 +631,8 @@ def get_agriculture_advanced_prediction():
 @app.route('/api/agriculture/analytics/generated/<path:relative_path>', methods=['GET'])
 def get_generated_analytics_file(relative_path: str):
     root = advanced_analytics_output_root.resolve()
-    candidate = (root / relative_path).resolve()
+    normalized_relative_path = str(relative_path or '').replace('\\', '/').lstrip('/')
+    candidate = (root / normalized_relative_path).resolve()
 
     if candidate != root and root not in candidate.parents:
         return json_error('请求的文件路径无效。', 400, 'ADVANCED_PREDICTION_PATH_INVALID')
@@ -975,6 +965,29 @@ def execute_workflow():
                 add_log(f"{indent}写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
             else:
                 add_log(f"{indent}未写入变量：未绑定 targetVariableId")
+            exec_node(props.get('nextNodeId'), depth)
+            return
+
+        if node_type == 'advanced_prediction':
+            output_kind = str(props.get('outputKind') or 'forecast_plot_url').strip() or 'forecast_plot_url'
+            payload: Any = ''
+            try:
+                prediction = run_workflow_prediction(sensor_db, props)
+                payload = prediction['payload']
+                add_log(
+                    f"{indent}高级预测完成: target={prediction['target']}, output={prediction['output_label']}, source={'重新生成' if prediction['source'] == 'generated' else '缓存结果'}"
+                )
+                if prediction['warning_message']:
+                    add_log(f"{indent}{prediction['warning_message']}")
+            except Exception as exc:
+                payload = '' if output_kind.endswith('_url') or output_kind.endswith('_csv') else {'status': 'error', 'message': str(exc)}
+                add_log(f"{indent}高级预测失败: {exc}")
+
+            written, _ = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
+            if written:
+                add_log(f"{indent}鍐欏叆鍙橀噺鎴愬姛: {('图片地址' if output_kind.endswith('_url') else ('CSV文本' if output_kind.endswith('_csv') else 'JSON文本'))}")
+            else:
+                add_log(f"{indent}鏈啓鍏ュ彉閲忥細鏈粦瀹?targetVariableId")
             exec_node(props.get('nextNodeId'), depth)
             return
 

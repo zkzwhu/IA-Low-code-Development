@@ -1282,10 +1282,20 @@ function getImageRenderState(component) {
     const binding = resolveWorkflowBinding(component);
     if (binding.valid) {
         if (binding.runtimeValue?.ok && String(binding.runtimeValue.value ?? '').trim()) {
+            const extracted = extractImageSourceFromStructuredValue(binding.runtimeValue.value);
+            if (extracted.ok) {
+                return {
+                    kind: 'image',
+                    src: extracted.src,
+                    note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
+                };
+            }
             return {
-                kind: 'image',
-                src: String(binding.runtimeValue.value),
-                note: `${binding.label} · ${getPortTypeLabel(binding.port.dataType)}`
+                kind: 'binding',
+                title: '当前端口不是图片数据',
+                note: extracted.reason === 'structured-non-image'
+                    ? `${binding.label} · 当前端口输出为结构化分析结果，请改绑图片 URL 端口，或改用图表 / 农业专题组件。`
+                    : `${binding.label} · 当前端口值不是可用的图片地址或 Base64。`
             };
         }
         return {
@@ -1425,6 +1435,70 @@ function tryParseJsonValue(value) {
     } catch (error) {
         return { ok: false, value: null };
     }
+}
+
+function looksLikeImageSource(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (text.startsWith('data:image/')) return true;
+    if (text.startsWith('blob:')) return true;
+    if (text.startsWith('/') || text.startsWith('./') || text.startsWith('../')) return true;
+    if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(text)) return true;
+    if (/\.(png|jpe?g|gif|webp|svg)(\?|#|$)/i.test(text)) return true;
+    return false;
+}
+
+function extractImageSourceFromStructuredValue(rawValue) {
+    if (rawValue == null) return { ok: false, reason: 'empty' };
+
+    if (typeof rawValue === 'string') {
+        const text = rawValue.trim();
+        if (!text) return { ok: false, reason: 'empty' };
+        if (looksLikeImageSource(text)) return { ok: true, src: text, sourceType: 'direct' };
+
+        const parsed = tryParseJsonValue(text);
+        if (parsed.ok) return extractImageSourceFromStructuredValue(parsed.value);
+
+        return { ok: false, reason: 'not-image-text', text };
+    }
+
+    if (Array.isArray(rawValue)) {
+        return { ok: false, reason: 'structured-non-image', value: rawValue };
+    }
+
+    if (typeof rawValue !== 'object') {
+        const text = String(rawValue || '').trim();
+        if (looksLikeImageSource(text)) return { ok: true, src: text, sourceType: 'direct' };
+        return { ok: false, reason: 'not-image-text', text };
+    }
+
+    const payload = unwrapStructuredPayload(rawValue) || rawValue;
+    const fileUrls = payload?.file_urls && typeof payload.file_urls === 'object' ? payload.file_urls : null;
+    const directCandidates = [
+        payload?.forecast_plot_url,
+        payload?.raw_plot_url,
+        payload?.feature_importance_plot_url,
+        payload?.corr_heatmap_plot_url,
+        payload?.anomaly_plot_url,
+        payload?.image_url,
+        payload?.imageUrl,
+        payload?.src,
+        payload?.url
+    ];
+    const nestedCandidates = fileUrls
+        ? [
+            fileUrls.forecast_plot,
+            fileUrls.raw_plot,
+            fileUrls.feature_importance_plot,
+            fileUrls.corr_heatmap_plot,
+            fileUrls.anomaly_plot
+        ]
+        : [];
+
+    const candidate = [...directCandidates, ...nestedCandidates].find(item => looksLikeImageSource(item));
+    if (candidate) return { ok: true, src: String(candidate), sourceType: 'structured-image' };
+
+    return { ok: false, reason: 'structured-non-image', value: payload };
 }
 
 function extractCsvFromStructuredValue(rawValue, chartType = 'bar') {
@@ -3711,8 +3785,9 @@ function renderStage() {
 
         if (component.type === 'image') {
             const imageState = getImageRenderState(component);
+            const resolvedImageSrc = imageState.kind === 'image' ? toAbsoluteUrl(imageState.src) : '';
             const imageHtml = imageState.kind === 'image'
-                ? `<img class="image-fill" src="${escapeHtml(imageState.src)}" alt="${escapeHtml(component.props.alt || '')}" style="object-fit:${escapeHtml(component.props.objectFit || 'cover')}; border-radius:${Number(component.props.borderRadius) || 0}px;">`
+                ? `<img class="image-fill" src="${escapeHtml(resolvedImageSrc)}" alt="${escapeHtml(component.props.alt || '')}" style="object-fit:${escapeHtml(component.props.objectFit || 'cover')}; border-radius:${Number(component.props.borderRadius) || 0}px;">`
                 : `
                     <div class="image-placeholder">
                         <div>

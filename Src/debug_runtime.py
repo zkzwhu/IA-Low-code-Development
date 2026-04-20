@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from database import SensorDatabase
+from workflow_prediction_service import run_workflow_prediction
 
 
 sensor_db = SensorDatabase()
@@ -193,6 +194,22 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
             lines.append(f"message = {props.get('message', '')!r}")
     elif node_type == "sequence":
         lines.append(f"comment = {props.get('comment', '')!r}")
+    elif node_type == "advanced_prediction":
+        output_kind = str(props.get("outputKind") or "forecast_plot_url").strip() or "forecast_plot_url"
+        payload: Any = ""
+        try:
+            prediction = run_workflow_prediction(sensor_db, props)
+            payload = prediction["payload"]
+            logs.append(
+                f"高级预测完成: target={prediction['target']}, output={prediction['output_label']}, source={'重新生成' if prediction['source'] == 'generated' else '缓存结果'}"
+            )
+            if prediction["warning_message"]:
+                logs.append(prediction["warning_message"])
+        except Exception as exc:
+            payload = "" if output_kind.endswith("_url") or output_kind.endswith("_csv") else {"status": "error", "message": str(exc)}
+            logs.append(f"高级预测失败: {exc}")
+        _write_payload_to_variable(session, props.get("targetVariableId"), payload, logs)
+        logs.extend(_goto(session, props.get("nextNodeId")))
     elif node_type == "loop":
         if props.get("loopConditionType") == "expr":
             lines.append(f"loopExpr = {props.get('loopConditionExpr', '')!r}")
@@ -227,6 +244,13 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
         lines.append(f"deviceId = {props.get('deviceId', '')!r}")
         lines.append(f"hours = {safe_int(props.get('hours', 168))}")
         lines.append(f"minPoints = {safe_int(props.get('minPoints', 24))}")
+        variable = variables_by_id.get(str(props.get("targetVariableId")))
+        lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
+    elif node_type == "advanced_prediction":
+        lines.append(f"target = {props.get('target', 'soil_humidity')!r}")
+        lines.append(f"outputKind = {props.get('outputKind', 'forecast_plot_url')!r}")
+        lines.append(f"deviceId = {props.get('deviceId', '')!r}")
+        lines.append(f"forecastSteps = {safe_int(props.get('forecastSteps', 7))}")
         variable = variables_by_id.get(str(props.get("targetVariableId")))
         lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
 

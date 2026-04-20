@@ -29,6 +29,7 @@ function typeLabel(type) {
         case 'db_query': return "数据库查询";
         case 'analytics_summary': return "农业分析摘要";
         case 'abstract_data_model': return "农业环境抽象模型";
+        case 'advanced_prediction': return "高级预测与可视化";
         case 'output': return "输出端口";
         default: return type;
     }
@@ -45,6 +46,7 @@ function nodeTypeIcon(type) {
         case 'db_query': return '🗄️';
         case 'analytics_summary': return '📈';
         case 'abstract_data_model': return '🧠';
+        case 'advanced_prediction': return '🖼️';
         case 'output': return '📤';
         default: return '◻';
     }
@@ -696,6 +698,26 @@ export function createNode(type, x, y) {
                 breakpoint: false
             };
             break;
+        case 'advanced_prediction':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                deviceId: '',
+                target: 'soil_humidity',
+                outputKind: 'forecast_plot_url',
+                featureColumns: 'temperature,humidity,light_lux',
+                resample: 'D',
+                window: 120,
+                lags: 7,
+                forecastSteps: 7,
+                lowThreshold: '',
+                highThreshold: '',
+                refreshAssets: 'true',
+                targetVariableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
+            break;
         default: break;
     }
     return baseNode;
@@ -1202,6 +1224,58 @@ function renderNodePropertyEditor(node, options = {}) {
         html += `<div class="help-text">该节点会自动读取历史传感器数据，构建农业环境抽象模型，并在结果中附带产量预测、气候趋势、决策建议以及适合大屏消费的 screen_contract。</div>`;
         html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'advanced_prediction') {
+        const outputKind = props.outputKind || 'forecast_plot_url';
+        html += `<div class="prop-group"><label class="prop-label">设备 ID（可选）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="deviceId" value="${escapeHtml(props.deviceId || '')}" placeholder="留空时使用默认设备"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">预测目标</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="target">
+                <option value="soil_humidity" ${props.target === 'soil_humidity' ? 'selected' : ''}>土壤湿度</option>
+                <option value="temperature" ${props.target === 'temperature' ? 'selected' : ''}>空气温度</option>
+                <option value="humidity" ${props.target === 'humidity' ? 'selected' : ''}>空气湿度</option>
+                <option value="light_lux" ${props.target === 'light_lux' ? 'selected' : ''}>光照强度</option>
+                <option value="soil_temperature" ${props.target === 'soil_temperature' ? 'selected' : ''}>土壤温度</option>
+            </select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">输出内容</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="outputKind">
+                <option value="forecast_plot_url" ${outputKind === 'forecast_plot_url' ? 'selected' : ''}>预测曲线图（图片 URL）</option>
+                <option value="raw_plot_url" ${outputKind === 'raw_plot_url' ? 'selected' : ''}>原始趋势图（图片 URL）</option>
+                <option value="feature_importance_plot_url" ${outputKind === 'feature_importance_plot_url' ? 'selected' : ''}>特征重要性图（图片 URL）</option>
+                <option value="corr_heatmap_plot_url" ${outputKind === 'corr_heatmap_plot_url' ? 'selected' : ''}>相关性热力图（图片 URL）</option>
+                <option value="anomaly_plot_url" ${outputKind === 'anomaly_plot_url' ? 'selected' : ''}>异常检测图（图片 URL）</option>
+                <option value="model_compare_csv" ${outputKind === 'model_compare_csv' ? 'selected' : ''}>模型对比（CSV）</option>
+                <option value="forecast_series_csv" ${outputKind === 'forecast_series_csv' ? 'selected' : ''}>预测序列（CSV）</option>
+                <option value="decision_report_json" ${outputKind === 'decision_report_json' ? 'selected' : ''}>决策报告（JSON）</option>
+                <option value="full_result_json" ${outputKind === 'full_result_json' ? 'selected' : ''}>完整结果（JSON）</option>
+            </select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">辅助特征（逗号分隔）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="featureColumns" value="${escapeHtml(props.featureColumns || '')}" placeholder="temperature,humidity,light_lux"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">重采样频率</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="resample" value="${escapeHtml(props.resample || 'D')}" placeholder="如 D / H / W"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">历史窗口</label>
+            <input class="prop-input" type="number" min="12" max="720" data-node-id="${node.id}" data-field="window" value="${props.window ?? 120}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">滞后步数</label>
+            <input class="prop-input" type="number" min="1" max="30" data-node-id="${node.id}" data-field="lags" value="${props.lags ?? 7}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">预测步数</label>
+            <input class="prop-input" type="number" min="1" max="60" data-node-id="${node.id}" data-field="forecastSteps" value="${props.forecastSteps ?? 7}"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">低阈值（可选）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="lowThreshold" value="${escapeHtml(props.lowThreshold ?? '')}" placeholder="如 35"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">高阈值（可选）</label>
+            <input class="prop-input" data-node-id="${node.id}" data-field="highThreshold" value="${escapeHtml(props.highThreshold ?? '')}" placeholder="如 62"></div>`;
+        html += `<div class="prop-group"><label class="prop-label">结果来源</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="refreshAssets">
+                <option value="true" ${String(props.refreshAssets) !== 'false' ? 'selected' : ''}>优先重新生成</option>
+                <option value="false" ${String(props.refreshAssets) === 'false' ? 'selected' : ''}>优先复用已有结果</option>
+            </select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">写入变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">当输出内容为图片 URL 时，建议写入字符串变量并绑定大屏图片组件；当输出内容为 CSV 时，建议写入 CSV 变量并绑定大屏图表组件。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     }
 
     if (!options.collapsible) return html;
@@ -1270,7 +1344,7 @@ function renderPropertiesPanel() {
             const beforeSnapshot = snapshotCanvasState();
 
             let val = el.value;
-            if (field === "loopCount" || field === "limit" || field === "hours" || field === "minPoints") val = parseInt(val, 10) || 1;
+            if (field === "loopCount" || field === "limit" || field === "hours" || field === "minPoints" || field === "window" || field === "lags" || field === "forecastSteps") val = parseInt(val, 10) || 1;
             if (field === "branchCondition") val = (val === "true");
             if (field === "variableId" || field === "targetVariableId") val = val === "" ? null : val;
             if (field === "name") {
@@ -1817,6 +1891,23 @@ export function renderCanvas() {
             const hours = Number(node.properties?.hours) || 168;
             bodyPreview = `建模窗口: ${hours} 小时<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
         }
+        else if(node.type === 'advanced_prediction') {
+            const variable = getWorkflowVariableById(node.properties?.targetVariableId);
+            const target = node.properties?.target || 'soil_humidity';
+            const outputKind = node.properties?.outputKind || 'forecast_plot_url';
+            const outputLabels = {
+                forecast_plot_url: '预测曲线图',
+                raw_plot_url: '原始趋势图',
+                feature_importance_plot_url: '特征重要性图',
+                corr_heatmap_plot_url: '相关性热力图',
+                anomaly_plot_url: '异常检测图',
+                model_compare_csv: '模型对比 CSV',
+                forecast_series_csv: '预测序列 CSV',
+                decision_report_json: '决策报告',
+                full_result_json: '完整结果'
+            };
+            bodyPreview = `${escapeHtml(target)} · ${escapeHtml(outputLabels[outputKind] || outputKind)}<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
         else if(node.type === 'output') {
             const variable = getWorkflowVariableById(node.properties?.variableId);
             bodyPreview = `输出变量: ${escapeHtml(variable?.name || "未选择变量")}`;
@@ -1849,7 +1940,7 @@ export function renderCanvas() {
 
         // 端口
         let connectPointsHtml = '';
-        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary' || node.type === 'abstract_data_model') {
+        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary' || node.type === 'abstract_data_model' || node.type === 'advanced_prediction') {
             connectPointsHtml = `<div class="connect-point" data-id="${node.id}" data-field="nextNodeId" style="${portStyle('nextNodeId', 50)} --cp-color:#3498db; --cp-hover-color:#2c7da0;" title="端口：下一步（next）【Shift+拖动可移动端口】"></div>`;
         } else if (node.type === 'loop') {
             connectPointsHtml = `
