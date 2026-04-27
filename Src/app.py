@@ -30,6 +30,12 @@ from workflow_prediction_service import (
     attach_prediction_file_urls,
     run_workflow_prediction,
 )
+from environment_model import (
+    build_data_packet,
+    build_environment_analysis_summary,
+    build_environment_model,
+)
+from workflow_static_check import detect_static_workflow, topological_order, validate_workflow_static
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -291,6 +297,19 @@ def resolve_variable_value(variable_id: str | None, variable_values: dict[str, A
     if variable.get('dataType') == 'int':
         return safe_int(value, safe_int(variable.get('defaultValue'), 0))
     return '' if value is None else str(value)
+
+
+def resolve_variable_payload(variable_id: str | None, variable_values: dict[str, Any], variable_defs_by_id: dict[str, dict[str, Any]]) -> Any:
+    value = resolve_variable_value(variable_id, variable_values, variable_defs_by_id)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
 
 
 def to_csv_text(raw_value: Any) -> str:
@@ -824,10 +843,24 @@ def execute_workflow():
     if not start_node:
         return jsonify({'logs': ['错误：未找到开始节点。'], 'outputs': {}, 'port_values': {}})
 
+    is_static_valid, static_messages = validate_workflow_static(nodes_data)
+    if not is_static_valid:
+        static_analysis = detect_static_workflow(nodes_data)
+        return jsonify({
+            'logs': ['========== 工作流静态检测未通过 =========='] + static_messages,
+            'outputs': {},
+            'port_values': {},
+            'portValuesById': {},
+            'portValuesByName': {},
+            'static_analysis': static_analysis,
+            'static_errors': static_messages,
+        }), 400
+
     variable_values, variable_defs_by_id = build_initial_variables(variable_defs)
     outputs: dict[str, Any] = {}
     logs: list[str] = []
     step_limit = 500
+    topo_ids, topo_warnings = topological_order(nodes_data)
 
     def add_log(message: str) -> None:
         logs.append(message)
@@ -885,11 +918,13 @@ def execute_workflow():
             payload: Any = []
             try:
                 if source == 'latest_data':
-                    payload = sensor_db.get_latest_sensor_data(device_id, limit)
-                    add_log(f"{indent}读取传感器最近数据: device={device_id}, rows={len(payload)}")
+                    rows = sensor_db.get_latest_sensor_data(device_id, limit)
+                    payload = build_data_packet(source_node_type='get_sensor_info', source_name=node_name(node), records=rows)
+                    add_log(f"{indent}读取传感器最近数据: device={device_id}, rows={len(rows)}")
                 else:
-                    payload = sensor_db.list_sensors()
-                    add_log(f"{indent}读取传感器设备列表: rows={len(payload)}")
+                    rows = sensor_db.list_sensors()
+                    payload = build_data_packet(source_node_type='get_sensor_info', source_name=node_name(node), records=rows)
+                    add_log(f"{indent}读取传感器设备列表: rows={len(rows)}")
             except Exception as exc:
                 payload = []
                 add_log(f"{indent}读取传感器信息失败: {exc}")
@@ -906,11 +941,33 @@ def execute_workflow():
             sql = str(props.get('sql') or '').strip()
             payload: Any = []
             try:
-                payload = run_readonly_query(sql)
-                add_log(f"{indent}数据库查询成功: rows={len(payload)}")
+                rows = run_readonly_query(sql)
+                payload = build_data_packet(source_node_type='db_query', source_name=node_name(node), records=rows)
+                add_log(f"{indent}数据库查询成功: rows={len(rows)}")
             except Exception as exc:
                 payload = []
                 add_log(f"{indent}数据库查询失败: {exc}")
+
+            written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
+            if written:
+                add_log(f"{indent}写入变量成功: {converted if isinstance(converted, int) else 'JSON文本'}")
+            else:
+                add_log(f"{indent}未写入变量：未绑定 targetVariableId")
+            exec_node(props.get('nextNodeId'), depth)
+            return
+
+        if node_type == 'environment_model':
+            input_payload = resolve_variable_payload(props.get('inputVariableId'), variable_values, variable_defs_by_id)
+            method = str(props.get('method') or 'weighted_index').strip() or 'weighted_index'
+            try:
+                payload = build_environment_model(input_payload, method=method)
+                add_log(
+                    f"{indent}环境建模完成: score={payload.get('environmentScore')}, "
+                    f"level={payload.get('environmentLevel')}, risk={payload.get('riskType')}"
+                )
+            except Exception as exc:
+                payload = {'status': 'error', 'message': str(exc)}
+                add_log(f"{indent}环境建模失败: {exc}")
 
             written, converted = assign_variable_value(props.get('targetVariableId'), payload, variable_values, variable_defs_by_id)
             if written:
@@ -927,7 +984,14 @@ def execute_workflow():
             limit = max(1, min(safe_int(props.get('limit'), 8), 50))
             payload: Any = []
             try:
-                payload = run_analysis_task(analysis_type, device_id, hours, limit)
+                payload = (
+                    build_environment_analysis_summary(
+                        resolve_variable_payload(props.get('inputVariableId'), variable_values, variable_defs_by_id),
+                        analysis_type=analysis_type,
+                    )
+                    if props.get('inputVariableId')
+                    else run_analysis_task(analysis_type, device_id, hours, limit)
+                )
                 result_size = len(payload) if isinstance(payload, list) else len(payload.keys()) if isinstance(payload, dict) else 1
                 add_log(f"{indent}分析任务完成: type={analysis_type}, size={result_size}")
             except Exception as exc:
@@ -1041,6 +1105,10 @@ def execute_workflow():
         add_log(f"{indent}警告：未知节点类型 {node_type}")
 
     add_log('========== 开始执行工作流 ==========')
+    if topo_ids:
+        add_log('拓扑执行顺序: ' + ' -> '.join(str(node_id) for node_id in topo_ids))
+    for warning in topo_warnings:
+        add_log(warning)
     try:
         exec_node(start_node['id'])
         add_log('========== 工作流执行完成 ==========')
@@ -1048,7 +1116,10 @@ def execute_workflow():
         add_log(f'错误：{exc}')
 
     port_values = {}
+    port_values_by_id = {}
+    port_values_by_name = {}
     for port in workflow_ports:
+        port_id = str(port.get('id') or '').strip()
         port_name = str(port.get('name') or '').strip()
         if not port_name:
             continue
@@ -1057,8 +1128,20 @@ def execute_workflow():
             continue
         value = resolve_variable_value(node.get('properties', {}).get('variableId'), variable_values, variable_defs_by_id)
         port_values[port_name] = value
+        port_values_by_name[port_name] = value
+        if port_id:
+            port_values_by_id[port_id] = value
 
-    return jsonify({'logs': logs, 'outputs': outputs, 'port_values': port_values})
+    static_analysis = detect_static_workflow(nodes_data, current_port_values=port_values_by_id or port_values_by_name)
+
+    return jsonify({
+        'logs': logs,
+        'outputs': outputs,
+        'port_values': port_values,
+        'portValuesById': port_values_by_id,
+        'portValuesByName': port_values_by_name,
+        'static_analysis': static_analysis,
+    })
 
 
 @app.route('/api/debug/start', methods=['POST'])

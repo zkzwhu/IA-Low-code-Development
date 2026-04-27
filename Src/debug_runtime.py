@@ -1,10 +1,16 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from typing import Any
 
 from database import SensorDatabase
+from environment_model import (
+    build_data_packet,
+    build_environment_analysis_summary,
+    build_environment_model,
+)
 from workflow_prediction_service import run_workflow_prediction
+from workflow_static_check import validate_workflow_static
 
 
 sensor_db = SensorDatabase()
@@ -78,6 +84,23 @@ def resolve_variable_value(
     return "" if value is None else str(value)
 
 
+def resolve_variable_payload(
+    variable_id: str | None,
+    variable_values: dict[str, Any],
+    variable_defs_by_id: dict[str, dict[str, Any]],
+) -> Any:
+    value = resolve_variable_value(variable_id, variable_values, variable_defs_by_id)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
 def to_csv_text(raw_value: Any) -> str:
     if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
         headers = list(raw_value[0].keys())
@@ -136,6 +159,10 @@ def run_readonly_query(sql: str) -> list[dict[str, Any]]:
 def create_session(payload: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
     data = payload if isinstance(payload, dict) else {"nodes": payload}
     nodes_data = data.get("nodes", []) or []
+    is_static_valid, static_messages = validate_workflow_static(nodes_data)
+    if not is_static_valid:
+        raise ValueError("工作流静态检测未通过：" + "；".join(static_messages))
+
     start = find_start(nodes_data)
     if not start:
         raise ValueError("no start node")
@@ -195,21 +222,12 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
     elif node_type == "sequence":
         lines.append(f"comment = {props.get('comment', '')!r}")
     elif node_type == "advanced_prediction":
-        output_kind = str(props.get("outputKind") or "forecast_plot_url").strip() or "forecast_plot_url"
-        payload: Any = ""
-        try:
-            prediction = run_workflow_prediction(sensor_db, props)
-            payload = prediction["payload"]
-            logs.append(
-                f"高级预测完成: target={prediction['target']}, output={prediction['output_label']}, source={'重新生成' if prediction['source'] == 'generated' else '缓存结果'}"
-            )
-            if prediction["warning_message"]:
-                logs.append(prediction["warning_message"])
-        except Exception as exc:
-            payload = "" if output_kind.endswith("_url") or output_kind.endswith("_csv") else {"status": "error", "message": str(exc)}
-            logs.append(f"高级预测失败: {exc}")
-        _write_payload_to_variable(session, props.get("targetVariableId"), payload, logs)
-        logs.extend(_goto(session, props.get("nextNodeId")))
+        lines.append(f"target = {props.get('target', 'soil_humidity')!r}")
+        lines.append(f"outputKind = {props.get('outputKind', 'forecast_plot_url')!r}")
+        lines.append(f"deviceId = {props.get('deviceId', '')!r}")
+        lines.append(f"forecastSteps = {safe_int(props.get('forecastSteps', 7))}")
+        variable = variables_by_id.get(str(props.get("targetVariableId")))
+        lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
     elif node_type == "loop":
         if props.get("loopConditionType") == "expr":
             lines.append(f"loopExpr = {props.get('loopConditionExpr', '')!r}")
@@ -233,6 +251,12 @@ def _node_debug_summary(node: dict[str, Any] | None, variables_by_id: dict[str, 
         lines.append(f"sql = {props.get('sql', '')!r}")
         variable = variables_by_id.get(str(props.get("targetVariableId")))
         lines.append(f"targetVariable = {variable.get('name') if variable else 'unknown'}")
+    elif node_type == "environment_model":
+        input_variable = variables_by_id.get(str(props.get("inputVariableId")))
+        target_variable = variables_by_id.get(str(props.get("targetVariableId")))
+        lines.append(f"inputVariable = {input_variable.get('name') if input_variable else 'unknown'}")
+        lines.append(f"method = {props.get('method', 'weighted_index')!r}")
+        lines.append(f"targetVariable = {target_variable.get('name') if target_variable else 'unknown'}")
     elif node_type == "analytics_summary":
         lines.append(f"analysisType = {props.get('analysisType', 'overview')!r}")
         lines.append(f"deviceId = {props.get('deviceId', '')!r}")
@@ -428,11 +452,13 @@ def step_once(session: dict[str, Any]) -> tuple[list[str], bool]:
         payload: Any = []
         try:
             if source == "latest_data":
-                payload = sensor_db.get_latest_sensor_data(device_id, limit)
-                logs.append(f"读取传感器最近数据: device={device_id}, rows={len(payload)}")
+                rows = sensor_db.get_latest_sensor_data(device_id, limit)
+                payload = build_data_packet(source_node_type="get_sensor_info", source_name=node_name(node), records=rows)
+                logs.append(f"读取传感器最近数据: device={device_id}, rows={len(rows)}")
             else:
-                payload = sensor_db.list_sensors()
-                logs.append(f"读取传感器设备列表: rows={len(payload)}")
+                rows = sensor_db.list_sensors()
+                payload = build_data_packet(source_node_type="get_sensor_info", source_name=node_name(node), records=rows)
+                logs.append(f"读取传感器设备列表: rows={len(rows)}")
         except Exception as exc:
             payload = []
             logs.append(f"读取传感器信息失败: {exc}")
@@ -442,11 +468,26 @@ def step_once(session: dict[str, Any]) -> tuple[list[str], bool]:
         sql = str(props.get("sql") or "").strip()
         payload: Any = []
         try:
-            payload = run_readonly_query(sql)
-            logs.append(f"数据库查询成功: rows={len(payload)}")
+            rows = run_readonly_query(sql)
+            payload = build_data_packet(source_node_type="db_query", source_name=node_name(node), records=rows)
+            logs.append(f"数据库查询成功: rows={len(rows)}")
         except Exception as exc:
             payload = []
             logs.append(f"数据库查询失败: {exc}")
+        _write_payload_to_variable(session, props.get("targetVariableId"), payload, logs)
+        logs.extend(_goto(session, props.get("nextNodeId")))
+    elif node_type == "environment_model":
+        input_payload = resolve_variable_payload(props.get("inputVariableId"), variable_values, variables_by_id)
+        method = str(props.get("method") or "weighted_index").strip() or "weighted_index"
+        try:
+            payload = build_environment_model(input_payload, method=method)
+            logs.append(
+                f"环境建模完成: score={payload.get('environmentScore')}, "
+                f"level={payload.get('environmentLevel')}, risk={payload.get('riskType')}"
+            )
+        except Exception as exc:
+            payload = {"status": "error", "message": str(exc)}
+            logs.append(f"环境建模失败: {exc}")
         _write_payload_to_variable(session, props.get("targetVariableId"), payload, logs)
         logs.extend(_goto(session, props.get("nextNodeId")))
     elif node_type == "analytics_summary":
@@ -456,11 +497,18 @@ def step_once(session: dict[str, Any]) -> tuple[list[str], bool]:
         limit = max(1, min(safe_int(props.get("limit", 8)), 50))
         payload: Any = []
         try:
-            payload = sensor_db.run_analysis_task(
-                analysis_type=analysis_type,
-                device_id=device_id,
-                hours=hours,
-                limit=limit,
+            payload = (
+                build_environment_analysis_summary(
+                    resolve_variable_payload(props.get("inputVariableId"), variable_values, variables_by_id),
+                    analysis_type=analysis_type,
+                )
+                if props.get("inputVariableId")
+                else sensor_db.run_analysis_task(
+                    analysis_type=analysis_type,
+                    device_id=device_id,
+                    hours=hours,
+                    limit=limit,
+                )
             )
             result_size = len(payload) if isinstance(payload, list) else len(payload.keys()) if isinstance(payload, dict) else 1
             logs.append(f"分析任务完成: type={analysis_type}, size={result_size}")

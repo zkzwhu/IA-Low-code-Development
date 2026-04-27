@@ -27,6 +27,7 @@ function typeLabel(type) {
         case 'branch': return "分支";
         case 'get_sensor_info': return "获取传感器信息";
         case 'db_query': return "数据库查询";
+        case 'environment_model': return "农业环境建模";
         case 'analytics_summary': return "农业分析摘要";
         case 'abstract_data_model': return "农业环境抽象模型";
         case 'advanced_prediction': return "高级预测与可视化";
@@ -44,6 +45,7 @@ function nodeTypeIcon(type) {
         case 'branch': return '🔀';
         case 'get_sensor_info': return '🌡️';
         case 'db_query': return '🗄️';
+        case 'environment_model': return '🌿';
         case 'analytics_summary': return '📈';
         case 'abstract_data_model': return '🧠';
         case 'advanced_prediction': return '🖼️';
@@ -673,9 +675,21 @@ export function createNode(type, x, y) {
                 breakpoint: false
             };
             break;
+        case 'environment_model':
+            baseNode.properties = {
+                name: defaultNameForType(type),
+                inputVariableId: null,
+                method: 'weighted_index',
+                targetVariableId: null,
+                nextNodeId: null,
+                portPositions: {},
+                breakpoint: false
+            };
+            break;
         case 'analytics_summary':
             baseNode.properties = {
                 name: defaultNameForType(type),
+                inputVariableId: null,
                 analysisType: 'overview',
                 deviceId: '',
                 hours: 48,
@@ -1185,8 +1199,30 @@ function renderNodePropertyEditor(node, options = {}) {
         html += `<div class="help-text">查询结果会写入变量。字符串变量保存 JSON 文本；整型变量保存记录条数。</div>`;
         html += `<div class="prop-group"><label class="prop-label">执行后下一节点</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
+    } else if (node.type === 'environment_model') {
+        const method = props.method || 'weighted_index';
+        html += `<div class="prop-group"><label class="prop-label">上游数据变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="inputVariableId">${getWorkflowVariableOptions(props.inputVariableId, true)}</select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">综合评价方法</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="method">
+                <option value="weighted_index" ${method === 'weighted_index' ? 'selected' : ''}>加权综合指数法</option>
+                <option value="entropy_weight" ${method === 'entropy_weight' ? 'selected' : ''}>熵权法（预留）</option>
+                <option value="topsis" ${method === 'topsis' ? 'selected' : ''}>TOPSIS（预留）</option>
+                <option value="grey_relation" ${method === 'grey_relation' ? 'selected' : ''}>灰色关联分析（预留）</option>
+            </select>
+        </div>`;
+        html += `<div class="prop-group"><label class="prop-label">写入变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="targetVariableId">${getWorkflowVariableOptions(props.targetVariableId, true)}</select>
+        </div>`;
+        html += `<div class="help-text">该节点只消费 get_sensor_info / db_query 输出的数据包，输出 environmentScore、environmentLevel、riskType、indicatorScores 和 suggestions。</div>`;
+        html += `<div class="prop-group"><label class="prop-label">执行后下一个节点</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="nextNodeId">${getNodeNameOptions(props.nextNodeId, true)}</select></div>`;
     } else if (node.type === 'analytics_summary') {
         const analysisType = props.analysisType || 'overview';
+        html += `<div class="prop-group"><label class="prop-label">上游模型变量</label>
+            <select class="prop-select" data-node-id="${node.id}" data-field="inputVariableId">${getWorkflowVariableOptions(props.inputVariableId, true)}</select>
+        </div>`;
         html += `<div class="prop-group"><label class="prop-label">分析任务</label>
             <select class="prop-select" data-node-id="${node.id}" data-field="analysisType">
                 <option value="overview" ${analysisType === 'overview' ? 'selected' : ''}>总览概况</option>
@@ -1346,7 +1382,7 @@ function renderPropertiesPanel() {
             let val = el.value;
             if (field === "loopCount" || field === "limit" || field === "hours" || field === "minPoints" || field === "window" || field === "lags" || field === "forecastSteps") val = parseInt(val, 10) || 1;
             if (field === "branchCondition") val = (val === "true");
-            if (field === "variableId" || field === "targetVariableId") val = val === "" ? null : val;
+            if (field === "variableId" || field === "targetVariableId" || field === "inputVariableId") val = val === "" ? null : val;
             if (field === "name") {
                 const r = ensureUniqueNameWithinType(node.type, val, node.id);
                 if (!r.ok) {
@@ -1886,6 +1922,11 @@ export function renderCanvas() {
             const analysisLabel = analysisLabels[node.properties?.analysisType] || '分析摘要';
             bodyPreview = `${analysisLabel}<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
         }
+        else if(node.type === 'environment_model') {
+            const inputVariable = getWorkflowVariableById(node.properties?.inputVariableId);
+            const variable = getWorkflowVariableById(node.properties?.targetVariableId);
+            bodyPreview = `输入: ${escapeHtml(inputVariable?.name || "未选择变量")}<br/>写入: ${escapeHtml(variable?.name || "未选择变量")}`;
+        }
         else if(node.type === 'abstract_data_model') {
             const variable = getWorkflowVariableById(node.properties?.targetVariableId);
             const hours = Number(node.properties?.hours) || 168;
@@ -1940,7 +1981,7 @@ export function renderCanvas() {
 
         // 端口
         let connectPointsHtml = '';
-        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary' || node.type === 'abstract_data_model' || node.type === 'advanced_prediction') {
+        if (node.type === 'start' || node.type === 'print' || node.type === 'sequence' || node.type === 'output' || node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'environment_model' || node.type === 'analytics_summary' || node.type === 'abstract_data_model' || node.type === 'advanced_prediction') {
             connectPointsHtml = `<div class="connect-point" data-id="${node.id}" data-field="nextNodeId" style="${portStyle('nextNodeId', 50)} --cp-color:#3498db; --cp-hover-color:#2c7da0;" title="端口：下一步（next）【Shift+拖动可移动端口】"></div>`;
         } else if (node.type === 'loop') {
             connectPointsHtml = `

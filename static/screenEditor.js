@@ -6629,6 +6629,46 @@ function buildPreviewHtml() {
     <script>
         const AGRI_API_ORIGIN = ${JSON.stringify(backendOrigin)};
         const WEATHER_FORECAST_ENDPOINT = ${JSON.stringify(`${backendOrigin}/api/weather/forecast`)};
+        const WORKFLOW_RUNTIME_STORAGE_KEY = 'ia.lowcode.workflow.runtime.v1';
+
+        function getWorkflowRuntimeSnapshot() {
+            try {
+                const bindings = Array.from(document.querySelectorAll('[data-source-mode="workflow-port"][data-workflow-project-id]'));
+                if (!bindings.length) return '';
+                const store = JSON.parse(localStorage.getItem(WORKFLOW_RUNTIME_STORAGE_KEY) || '{}');
+                return JSON.stringify(bindings.map((element) => {
+                    const projectId = element.getAttribute('data-workflow-project-id') || '';
+                    const portId = element.getAttribute('data-workflow-port-id') || '';
+                    const portName = element.getAttribute('data-workflow-port-name') || '';
+                    const record = (store.records || {})[projectId] || {};
+                    const byId = record.portValuesById || {};
+                    const byName = record.portValuesByName || {};
+                    return {
+                        projectId,
+                        portId,
+                        portName,
+                        updatedAt: record.updatedAt || '',
+                        value: Object.prototype.hasOwnProperty.call(byId, portId) ? byId[portId] : byName[portName]
+                    };
+                }));
+            } catch (error) {
+                return '';
+            }
+        }
+
+        let workflowRuntimeSnapshot = getWorkflowRuntimeSnapshot();
+        function refreshWorkflowRuntimeBindings() {
+            const nextSnapshot = getWorkflowRuntimeSnapshot();
+            if (nextSnapshot && workflowRuntimeSnapshot && nextSnapshot !== workflowRuntimeSnapshot) {
+                window.location.reload();
+                return;
+            }
+            workflowRuntimeSnapshot = nextSnapshot || workflowRuntimeSnapshot;
+        }
+        window.addEventListener('storage', (event) => {
+            if (event.key === WORKFLOW_RUNTIME_STORAGE_KEY) refreshWorkflowRuntimeBindings();
+        });
+        window.setInterval(refreshWorkflowRuntimeBindings, 3000);
 
         function appendPreviewTimestamp(url, key = '__ts', value = Date.now()) {
             const text = String(url || '').trim();

@@ -10,7 +10,7 @@ import { saveWorkflowRuntime } from './workflowRuntimeStore.js';
 import { initializeWorkflowProjectFromEntry, startWorkflowAutoSave } from './workflowProjectService.js';
 
 let debugSessionId = null;
-const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output', 'get_sensor_info', 'db_query', 'analytics_summary', 'abstract_data_model', 'advanced_prediction']);
+const ALLOWED_NODE_TYPES = new Set(['start', 'print', 'sequence', 'loop', 'branch', 'output', 'get_sensor_info', 'db_query', 'environment_model', 'analytics_summary', 'abstract_data_model', 'advanced_prediction']);
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
@@ -47,6 +47,7 @@ const COMPONENT_LIBRARY = [
         items: [
             { type: 'get_sensor_info', icon: '🌡️', title: '获取传感器信息', desc: '读取设备列表或最近数据写入变量。' },
             { type: 'db_query', icon: '🗄️', title: '数据库查询', desc: '执行只读 SQL 并把结果写入变量。' },
+            { type: 'environment_model', icon: '🌿', title: '农业环境建模', desc: '消费上游标准化数据包，输出环境评分、风险和建议。' },
             { type: 'analytics_summary', icon: '📈', title: '农业分析摘要', desc: '生成趋势、告警、建议或报告摘要并写入变量。' },
             { type: 'abstract_data_model', icon: '🧠', title: '农业环境抽象模型', desc: '构建农业环境抽象模型，并输出产量、气候和决策所需的统一数据契约。' },
             { type: 'advanced_prediction', icon: '🖼️', title: '高级预测与可视化', desc: '生成预测图片 URL 或图表 CSV，可直接绑定大屏图片和图表组件。' },
@@ -537,18 +538,27 @@ async function runWorkflow() {
             body: JSON.stringify(buildWorkflowPayload())
         });
         const result = await response.json();
+        if (result?.static_analysis?.isStatic) {
+            addConsoleLog(`⚠ 当前工作流为静态：${(result.static_analysis.reasons || []).join('；')}`, 'warn', 'run');
+        }
         if (response.ok && state.currentProject?.id) {
-            const portValuesByName = result?.port_values && typeof result.port_values === 'object'
-                ? result.port_values
+            const portValuesByName = result?.portValuesByName && typeof result.portValuesByName === 'object'
+                ? result.portValuesByName
+                : result?.port_values && typeof result.port_values === 'object'
+                    ? result.port_values
+                    : {};
+            const portValuesById = result?.portValuesById && typeof result.portValuesById === 'object'
+                ? result.portValuesById
                 : {};
-            const portValuesById = {};
 
-            for (const port of state.workflowPorts || []) {
-                const portId = String(port?.id || '');
-                const portName = String(port?.name || '').trim();
-                if (!portId || !portName) continue;
-                if (Object.prototype.hasOwnProperty.call(portValuesByName, portName)) {
-                    portValuesById[portId] = portValuesByName[portName];
+            if (!Object.keys(portValuesById).length) {
+                for (const port of state.workflowPorts || []) {
+                    const portId = String(port?.id || '');
+                    const portName = String(port?.name || '').trim();
+                    if (!portId || !portName) continue;
+                    if (Object.prototype.hasOwnProperty.call(portValuesByName, portName)) {
+                        portValuesById[portId] = portValuesByName[portName];
+                    }
                 }
             }
 
@@ -562,6 +572,9 @@ async function runWorkflow() {
         } else {
             clearConsole('run');
             addConsoleLog('执行完成，无输出日志。', 'run', 'run');
+        }
+        if (result?.static_analysis?.isStatic) {
+            addConsoleLog(`当前工作流为静态：${(result.static_analysis.reasons || []).join('；')}`, 'warn', 'run');
         }
     } catch (e) {
         addConsoleLog(`执行时发生错误：${e.message}`, 'error', 'run');

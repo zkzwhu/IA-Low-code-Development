@@ -97,10 +97,14 @@ function syncNodeVariableReferences(validVariableIds) {
             }
         }
 
-        if (node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'analytics_summary' || node.type === 'abstract_data_model' || node.type === 'advanced_prediction') {
+        if (node.type === 'get_sensor_info' || node.type === 'db_query' || node.type === 'environment_model' || node.type === 'analytics_summary' || node.type === 'abstract_data_model' || node.type === 'advanced_prediction') {
             const variableId = node.properties?.targetVariableId;
             if (variableId && !validVariableIds.has(variableId)) {
                 node.properties.targetVariableId = null;
+            }
+            const inputVariableId = node.properties?.inputVariableId;
+            if (inputVariableId && !validVariableIds.has(inputVariableId)) {
+                node.properties.inputVariableId = null;
             }
         }
     }
